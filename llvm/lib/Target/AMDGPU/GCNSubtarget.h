@@ -136,6 +136,7 @@ protected:
   bool HasGFX10A16;
   bool HasG16;
   bool HasNSAEncoding;
+  unsigned NSAMaxSize;
   bool GFX10_AEncoding;
   bool GFX10_BEncoding;
   bool HasDLInsts;
@@ -285,6 +286,11 @@ public:
   }
 
   unsigned getConstantBusLimit(unsigned Opcode) const;
+
+  /// Returns if the result of this instruction with a 16-bit result returned in
+  /// a 32-bit register implicitly zeroes the high 16-bits, rather than preserve
+  /// the original value.
+  bool zeroesHigh16BitsOfDest(unsigned Opcode) const;
 
   bool hasIntClamp() const {
     return HasIntClamp;
@@ -872,6 +878,8 @@ public:
   bool hasImageGather4D16Bug() const { return HasImageGather4D16Bug; }
 
   bool hasNSAEncoding() const { return HasNSAEncoding; }
+
+  unsigned getNSAMaxSize() const { return NSAMaxSize; }
 
   bool hasGFX10_AEncoding() const {
     return GFX10_AEncoding;

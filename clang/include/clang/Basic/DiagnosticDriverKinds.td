@@ -231,6 +231,8 @@ def warn_invalid_ios_deployment_target : Warning<
   "invalid iOS deployment version '%0', iOS 10 is the maximum deployment "
   "target for 32-bit targets">, InGroup<InvalidIOSDeploymentTarget>,
   DefaultError;
+def err_invalid_macos_32bit_deployment_target : Error<
+  "32-bit targets are not supported when building for Mac Catalyst">;
 def err_drv_conflicting_deployment_targets : Error<
   "conflicting deployment targets, both '%0' and '%1' are present in environment">;
 def err_arc_unsupported_on_runtime : Error<
@@ -541,9 +543,6 @@ def warn_drv_libstdcxx_not_found : Warning<
 def err_drv_cannot_mix_options : Error<"cannot specify '%1' along with '%0'">;
 
 def err_drv_invalid_object_mode : Error<"OBJECT_MODE setting %0 is not recognized and is not a valid setting.">;
-
-def err_aix_default_altivec_abi : Error<
-  "The default Altivec ABI on AIX is not yet supported, use '-mabi=vec-extabi' for the extended Altivec ABI">;
 
 def err_aix_unsupported_tls_model : Error<"TLS model '%0' is not yet supported on AIX">;
 

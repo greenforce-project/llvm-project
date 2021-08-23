@@ -43,9 +43,12 @@ public:
       LHS = BO->getLHS();
       RHS = BO->getRHS();
     } else if (auto *OO = dyn_cast<CXXOperatorCallExpr>(E)) {
-      Op = OO->getOperator();
-      LHS = OO->getArg(0);
-      RHS = OO->getArg(1);
+      // If OO is not || or && it might not have exactly 2 arguments.
+      if (OO->getNumArgs() == 2) {
+        Op = OO->getOperator();
+        LHS = OO->getArg(0);
+        RHS = OO->getArg(1);
+      }
     }
   }
 
@@ -739,22 +742,15 @@ Optional<NormalizedConstraint>
 NormalizedConstraint::fromConstraintExprs(Sema &S, NamedDecl *D,
                                           ArrayRef<const Expr *> E) {
   assert(E.size() != 0);
-  auto First = fromConstraintExpr(S, D, E[0]);
-  if (E.size() == 1)
-    return First;
-  auto Second = fromConstraintExpr(S, D, E[1]);
-  if (!Second)
+  auto Conjunction = fromConstraintExpr(S, D, E[0]);
+  if (!Conjunction)
     return None;
-  llvm::Optional<NormalizedConstraint> Conjunction;
-  Conjunction.emplace(S.Context, std::move(*First), std::move(*Second),
-                      CCK_Conjunction);
-  for (unsigned I = 2; I < E.size(); ++I) {
+  for (unsigned I = 1; I < E.size(); ++I) {
     auto Next = fromConstraintExpr(S, D, E[I]);
     if (!Next)
-      return llvm::Optional<NormalizedConstraint>{};
-    NormalizedConstraint NewConjunction(S.Context, std::move(*Conjunction),
+      return None;
+    *Conjunction = NormalizedConstraint(S.Context, std::move(*Conjunction),
                                         std::move(*Next), CCK_Conjunction);
-    *Conjunction = std::move(NewConjunction);
   }
   return Conjunction;
 }

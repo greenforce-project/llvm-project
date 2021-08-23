@@ -29,12 +29,10 @@
 #include <utility>
 #include <vector>
 
-namespace llvm {
-namespace objcopy {
-namespace elf {
-
-using namespace object;
-using namespace ELF;
+using namespace llvm;
+using namespace llvm::ELF;
+using namespace llvm::objcopy::elf;
+using namespace llvm::object;
 
 template <class ELFT> void ELFWriter<ELFT>::writePhdr(const Segment &Seg) {
   uint8_t *B = reinterpret_cast<uint8_t *>(Buf->getBufferStart()) +
@@ -192,7 +190,7 @@ template <class T> static T checkedGetHex(StringRef S) {
 // Fills exactly Len bytes of buffer with hexadecimal characters
 // representing value 'X'
 template <class T, class Iterator>
-static Iterator utohexstr(T X, Iterator It, size_t Len) {
+static Iterator toHexStr(T X, Iterator It, size_t Len) {
   // Fill range with '0'
   std::fill(It, It + Len, '0');
 
@@ -221,13 +219,13 @@ IHexLineData IHexRecord::getLine(uint8_t Type, uint16_t Addr,
   assert(Line.size());
   auto Iter = Line.begin();
   *Iter++ = ':';
-  Iter = utohexstr(Data.size(), Iter, 2);
-  Iter = utohexstr(Addr, Iter, 4);
-  Iter = utohexstr(Type, Iter, 2);
+  Iter = toHexStr(Data.size(), Iter, 2);
+  Iter = toHexStr(Addr, Iter, 4);
+  Iter = toHexStr(Type, Iter, 2);
   for (uint8_t X : Data)
-    Iter = utohexstr(X, Iter, 2);
+    Iter = toHexStr(X, Iter, 2);
   StringRef S(Line.data() + 1, std::distance(Line.begin() + 1, Iter));
-  Iter = utohexstr(getChecksum(S), Iter, 2);
+  Iter = toHexStr(getChecksum(S), Iter, 2);
   *Iter++ = '\r';
   *Iter++ = '\n';
   assert(Iter == Line.end());
@@ -1071,6 +1069,12 @@ Error Section::removeSectionReferences(
 void GroupSection::finalize() {
   this->Info = Sym ? Sym->Index : 0;
   this->Link = SymTab ? SymTab->Index : 0;
+  // Linker deduplication for GRP_COMDAT is based on Sym->Name. The local/global
+  // status is not part of the equation. If Sym is localized, the intention is
+  // likely to make the group fully localized. Drop GRP_COMDAT to suppress
+  // deduplication. See https://groups.google.com/g/generic-abi/c/2X6mR-s2zoc
+  if ((FlagWord & GRP_COMDAT) && Sym && Sym->Binding == STB_LOCAL)
+    this->FlagWord &= ~GRP_COMDAT;
 }
 
 Error GroupSection::removeSectionReferences(
@@ -1183,7 +1187,7 @@ template <class ELFT>
 Error ELFSectionWriter<ELFT>::visit(const GroupSection &Sec) {
   ELF::Elf32_Word *Buf =
       reinterpret_cast<ELF::Elf32_Word *>(Out.getBufferStart() + Sec.Offset);
-  *Buf++ = Sec.FlagWord;
+  support::endian::write32<ELFT::TargetEndianness>(Buf++, Sec.FlagWord);
   for (SectionBase *S : Sec.GroupMembers)
     support::endian::write32<ELFT::TargetEndianness>(Buf++, S->Index);
   return Error::success();
@@ -1513,7 +1517,8 @@ Error ELFBuilder<ELFT>::initGroupSection(GroupSection *GroupSec) {
       reinterpret_cast<const ELF::Elf32_Word *>(GroupSec->Contents.data());
   const ELF::Elf32_Word *End =
       Word + GroupSec->Contents.size() / sizeof(ELF::Elf32_Word);
-  GroupSec->setFlagWord(*Word++);
+  GroupSec->setFlagWord(
+      support::endian::read32<ELFT::TargetEndianness>(Word++));
   for (; Word != End; ++Word) {
     uint32_t Index = support::endian::read32<ELFT::TargetEndianness>(Word);
     Expected<SectionBase *> Sec = SecTable.getSection(
@@ -2705,6 +2710,10 @@ Error IHexWriter::finalize() {
 
   return Error::success();
 }
+
+namespace llvm {
+namespace objcopy {
+namespace elf {
 
 template class ELFBuilder<ELF64LE>;
 template class ELFBuilder<ELF64BE>;

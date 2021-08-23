@@ -16,6 +16,8 @@
 using namespace mlir;
 using namespace mlir::sparse_tensor;
 
+#include "mlir/Dialect/SparseTensor/IR/SparseTensorOpsDialect.cpp.inc"
+
 //===----------------------------------------------------------------------===//
 // TensorDialect Attribute Methods.
 //===----------------------------------------------------------------------===//
@@ -212,9 +214,9 @@ static LogicalResult verify(NewOp op) {
 }
 
 static LogicalResult verify(ToPointersOp op) {
-  if (failed(isInBounds(op.dim(), op.tensor())))
-    return op.emitError("requested pointers dimension out of bounds");
   if (auto e = getSparseTensorEncoding(op.tensor().getType())) {
+    if (failed(isInBounds(op.dim(), op.tensor())))
+      return op.emitError("requested pointers dimension out of bounds");
     if (failed(isMatchingWidth(op.result(), e.getPointerBitWidth())))
       return op.emitError("unexpected type for pointers");
     return success();
@@ -223,9 +225,9 @@ static LogicalResult verify(ToPointersOp op) {
 }
 
 static LogicalResult verify(ToIndicesOp op) {
-  if (failed(isInBounds(op.dim(), op.tensor())))
-    return op.emitError("requested indices dimension out of bounds");
   if (auto e = getSparseTensorEncoding(op.tensor().getType())) {
+    if (failed(isInBounds(op.dim(), op.tensor())))
+      return op.emitError("requested indices dimension out of bounds");
     if (failed(isMatchingWidth(op.result(), e.getIndexBitWidth())))
       return op.emitError("unexpected type for indices");
     return success();
@@ -243,19 +245,10 @@ static LogicalResult verify(ToValuesOp op) {
   return success();
 }
 
-// TODO: generalize this beyond all-dense linearized "sparse" tensors
 static LogicalResult verify(ToTensorOp op) {
-  if (op.getNumOperands() != 1)
-    return op.emitError("expected single values array");
-  if (auto e = getSparseTensorEncoding(op.result().getType())) {
-    auto dlt = e.getDimLevelType();
-    for (unsigned i = 0, sz = dlt.size(); i < sz; i++) {
-      if (dlt[i] != SparseTensorEncodingAttr::DimLevelType::Dense)
-        return op.emitError("unexpected non-dense dimension");
-    }
-    return success();
-  }
-  return op.emitError("expected a sparse tensor as result");
+  if (!getSparseTensorEncoding(op.result().getType()))
+    return op.emitError("expected a sparse tensor as result");
+  return success();
 }
 
 //===----------------------------------------------------------------------===//

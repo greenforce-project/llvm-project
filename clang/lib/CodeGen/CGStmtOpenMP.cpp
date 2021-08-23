@@ -517,6 +517,10 @@ static llvm::Function *emitOutlinedFunctionPrologue(
     F->setDoesNotThrow();
   F->setDoesNotRecurse();
 
+  // Always inline the outlined function if optimizations are enabled.
+  if (CGM.getCodeGenOpts().OptimizationLevel != 0)
+    F->addFnAttr(llvm::Attribute::AlwaysInline);
+
   // Generate the function.
   CGF.StartFunction(CD, Ctx.VoidTy, F, FuncInfo, TargetArgs,
                     FO.UIntPtrCastRequired ? FO.Loc : FO.S->getBeginLoc(),
@@ -698,7 +702,8 @@ void CodeGenFunction::EmitOMPAggregateAssign(
   llvm::Value *SrcBegin = SrcAddr.getPointer();
   llvm::Value *DestBegin = DestAddr.getPointer();
   // Cast from pointer to array type to pointer to single element.
-  llvm::Value *DestEnd = Builder.CreateGEP(DestBegin, NumElements);
+  llvm::Value *DestEnd =
+      Builder.CreateGEP(DestAddr.getElementType(), DestBegin, NumElements);
   // The basic structure here is a while-do loop.
   llvm::BasicBlock *BodyBB = createBasicBlock("omp.arraycpy.body");
   llvm::BasicBlock *DoneBB = createBasicBlock("omp.arraycpy.done");
@@ -731,9 +736,11 @@ void CodeGenFunction::EmitOMPAggregateAssign(
 
   // Shift the address forward by one element.
   llvm::Value *DestElementNext = Builder.CreateConstGEP1_32(
-      DestElementPHI, /*Idx0=*/1, "omp.arraycpy.dest.element");
+      DestAddr.getElementType(), DestElementPHI, /*Idx0=*/1,
+      "omp.arraycpy.dest.element");
   llvm::Value *SrcElementNext = Builder.CreateConstGEP1_32(
-      SrcElementPHI, /*Idx0=*/1, "omp.arraycpy.src.element");
+      SrcAddr.getElementType(), SrcElementPHI, /*Idx0=*/1,
+      "omp.arraycpy.src.element");
   // Check whether we've reached the end.
   llvm::Value *Done =
       Builder.CreateICmpEQ(DestElementNext, DestEnd, "omp.arraycpy.done");
@@ -826,8 +833,7 @@ bool CodeGenFunction::EmitOMPFirstprivateClause(const OMPExecutableDirective &D,
       if (DeviceConstTarget && OrigVD->getType().isConstant(getContext()) &&
           FD && FD->getType()->isReferenceType() &&
           (!VD || !VD->hasAttr<OMPAllocateDeclAttr>())) {
-        (void)CGM.getOpenMPRuntime().registerTargetFirstprivateCopy(*this,
-                                                                    OrigVD);
+        EmittedAsFirstprivate.insert(OrigVD->getCanonicalDecl());
         ++IRef;
         ++InitsRef;
         continue;
@@ -2323,8 +2329,7 @@ void CodeGenFunction::EmitOMPLinearClause(
 }
 
 static void emitSimdlenSafelenClause(CodeGenFunction &CGF,
-                                     const OMPExecutableDirective &D,
-                                     bool IsMonotonic) {
+                                     const OMPExecutableDirective &D) {
   if (!CGF.HaveInsertPoint())
     return;
   if (const auto *C = D.getSingleClause<OMPSimdlenClause>()) {
@@ -2335,8 +2340,7 @@ static void emitSimdlenSafelenClause(CodeGenFunction &CGF,
     // In presence of finite 'safelen', it may be unsafe to mark all
     // the memory instructions parallel, because loop-carried
     // dependences of 'safelen' iterations are possible.
-    if (!IsMonotonic)
-      CGF.LoopStack.setParallel(!D.getSingleClause<OMPSafelenClause>());
+    CGF.LoopStack.setParallel(!D.getSingleClause<OMPSafelenClause>());
   } else if (const auto *C = D.getSingleClause<OMPSafelenClause>()) {
     RValue Len = CGF.EmitAnyExpr(C->getSafelen(), AggValueSlot::ignored(),
                                  /*ignoreResult=*/true);
@@ -2349,12 +2353,11 @@ static void emitSimdlenSafelenClause(CodeGenFunction &CGF,
   }
 }
 
-void CodeGenFunction::EmitOMPSimdInit(const OMPLoopDirective &D,
-                                      bool IsMonotonic) {
+void CodeGenFunction::EmitOMPSimdInit(const OMPLoopDirective &D) {
   // Walk clauses and process safelen/lastprivate.
-  LoopStack.setParallel(!IsMonotonic);
+  LoopStack.setParallel(/*Enable=*/true);
   LoopStack.setVectorizeEnable();
-  emitSimdlenSafelenClause(*this, D, IsMonotonic);
+  emitSimdlenSafelenClause(*this, D);
   if (const auto *C = D.getSingleClause<OMPOrderClause>())
     if (C->getKind() == OMPC_ORDER_concurrent)
       LoopStack.setParallel(/*Enable=*/true);
@@ -2677,7 +2680,7 @@ void CodeGenFunction::EmitOMPOuterLoop(
             if (C->getKind() == OMPC_ORDER_concurrent)
               CGF.LoopStack.setParallel(/*Enable=*/true);
         } else {
-          CGF.EmitOMPSimdInit(S, IsMonotonic);
+          CGF.EmitOMPSimdInit(S);
         }
       },
       [&S, &LoopArgs, LoopExit, &CodeGenLoop, IVSize, IVSigned, &CodeGenOrdered,
@@ -3187,8 +3190,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(
           isOpenMPLoopBoundSharingDirective(S.getDirectiveKind());
       bool IsMonotonic =
           Ordered ||
-          ((ScheduleKind.Schedule == OMPC_SCHEDULE_static ||
-            ScheduleKind.Schedule == OMPC_SCHEDULE_unknown) &&
+          (ScheduleKind.Schedule == OMPC_SCHEDULE_static &&
            !(ScheduleKind.M1 == OMPC_SCHEDULE_MODIFIER_nonmonotonic ||
              ScheduleKind.M2 == OMPC_SCHEDULE_MODIFIER_nonmonotonic)) ||
           ScheduleKind.M1 == OMPC_SCHEDULE_MODIFIER_monotonic ||
@@ -3201,9 +3203,9 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(
             getJumpDestInCurrentScope(createBasicBlock("omp.loop.exit"));
         emitCommonSimdLoop(
             *this, S,
-            [&S, IsMonotonic](CodeGenFunction &CGF, PrePostActionTy &) {
+            [&S](CodeGenFunction &CGF, PrePostActionTy &) {
               if (isOpenMPSimdDirective(S.getDirectiveKind())) {
-                CGF.EmitOMPSimdInit(S, IsMonotonic);
+                CGF.EmitOMPSimdInit(S);
               } else if (const auto *C = S.getSingleClause<OMPOrderClause>()) {
                 if (C->getKind() == OMPC_ORDER_concurrent)
                   CGF.LoopStack.setParallel(/*Enable=*/true);
@@ -5225,7 +5227,7 @@ void CodeGenFunction::EmitOMPDistributeLoop(const OMPLoopDirective &S,
             *this, S,
             [&S](CodeGenFunction &CGF, PrePostActionTy &) {
               if (isOpenMPSimdDirective(S.getDirectiveKind()))
-                CGF.EmitOMPSimdInit(S, /*IsMonotonic=*/true);
+                CGF.EmitOMPSimdInit(S);
             },
             [&S, &LoopScope, Cond, IncExpr, LoopExit, &CodeGenLoop,
              StaticChunked](CodeGenFunction &CGF, PrePostActionTy &) {
@@ -5305,6 +5307,8 @@ static llvm::Function *emitOutlinedOrderedFunction(CodeGenModule &CGM,
   CGF.CapturedStmtInfo = &CapStmtInfo;
   llvm::Function *Fn = CGF.GenerateOpenMPCapturedStmtFunction(*S, Loc);
   Fn->setDoesNotRecurse();
+  if (CGM.getCodeGenOpts().OptimizationLevel != 0)
+    Fn->addFnAttr(llvm::Attribute::AlwaysInline);
   return Fn;
 }
 
@@ -5727,32 +5731,35 @@ static void emitOMPAtomicCaptureExpr(CodeGenFunction &CGF,
   // Emit post-update store to 'v' of old/new 'x' value.
   CGF.emitOMPSimpleStore(VLValue, NewVVal, NewVValType, Loc);
   CGF.CGM.getOpenMPRuntime().checkAndEmitLastprivateConditional(CGF, V);
-  // OpenMP, 2.17.7, atomic Construct
-  // If the write, update, or capture clause is specified and the release,
-  // acq_rel, or seq_cst clause is specified then the strong flush on entry to
-  // the atomic operation is also a release flush.
-  // If the read or capture clause is specified and the acquire, acq_rel, or
-  // seq_cst clause is specified then the strong flush on exit from the atomic
-  // operation is also an acquire flush.
-  switch (AO) {
-  case llvm::AtomicOrdering::Release:
-    CGF.CGM.getOpenMPRuntime().emitFlush(CGF, llvm::None, Loc,
-                                         llvm::AtomicOrdering::Release);
-    break;
-  case llvm::AtomicOrdering::Acquire:
-    CGF.CGM.getOpenMPRuntime().emitFlush(CGF, llvm::None, Loc,
-                                         llvm::AtomicOrdering::Acquire);
-    break;
-  case llvm::AtomicOrdering::AcquireRelease:
-  case llvm::AtomicOrdering::SequentiallyConsistent:
-    CGF.CGM.getOpenMPRuntime().emitFlush(CGF, llvm::None, Loc,
-                                         llvm::AtomicOrdering::AcquireRelease);
-    break;
-  case llvm::AtomicOrdering::Monotonic:
-    break;
-  case llvm::AtomicOrdering::NotAtomic:
-  case llvm::AtomicOrdering::Unordered:
-    llvm_unreachable("Unexpected ordering.");
+  // OpenMP 5.1 removes the required flush for capture clause.
+  if (CGF.CGM.getLangOpts().OpenMP < 51) {
+    // OpenMP, 2.17.7, atomic Construct
+    // If the write, update, or capture clause is specified and the release,
+    // acq_rel, or seq_cst clause is specified then the strong flush on entry to
+    // the atomic operation is also a release flush.
+    // If the read or capture clause is specified and the acquire, acq_rel, or
+    // seq_cst clause is specified then the strong flush on exit from the atomic
+    // operation is also an acquire flush.
+    switch (AO) {
+    case llvm::AtomicOrdering::Release:
+      CGF.CGM.getOpenMPRuntime().emitFlush(CGF, llvm::None, Loc,
+                                           llvm::AtomicOrdering::Release);
+      break;
+    case llvm::AtomicOrdering::Acquire:
+      CGF.CGM.getOpenMPRuntime().emitFlush(CGF, llvm::None, Loc,
+                                           llvm::AtomicOrdering::Acquire);
+      break;
+    case llvm::AtomicOrdering::AcquireRelease:
+    case llvm::AtomicOrdering::SequentiallyConsistent:
+      CGF.CGM.getOpenMPRuntime().emitFlush(
+          CGF, llvm::None, Loc, llvm::AtomicOrdering::AcquireRelease);
+      break;
+    case llvm::AtomicOrdering::Monotonic:
+      break;
+    case llvm::AtomicOrdering::NotAtomic:
+    case llvm::AtomicOrdering::Unordered:
+      llvm_unreachable("Unexpected ordering.");
+    }
   }
 }
 

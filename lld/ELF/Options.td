@@ -43,6 +43,9 @@ def Bsymbolic: F<"Bsymbolic">, HelpText<"Bind default visibility defined symbols
 def Bsymbolic_functions: F<"Bsymbolic-functions">,
   HelpText<"Bind default visibility defined function symbols locally for -shared">;
 
+def Bsymbolic_non_weak_functions: F<"Bsymbolic-non-weak-functions">,
+  HelpText<"Bind default visibility defined STB_GLOBAL function symbols locally for -shared">;
+
 def Bdynamic: F<"Bdynamic">, HelpText<"Link against shared libraries (default)">;
 
 def Bstatic: F<"Bstatic">, HelpText<"Do not link against shared libraries">;
@@ -126,9 +129,7 @@ def color_diagnostics_eq: J<"color-diagnostics=">,
   HelpText<"Use colors in diagnostics (default: auto)">,
   MetaVarName<"[auto,always,never]">;
 
-defm cref: B<"cref",
-    "Output cross reference table",
-    "Do not output cross reference table">;
+def cref: FF<"cref">, HelpText<"Output cross reference table">;
 
 defm define_common: B<"define-common",
     "Assign space to common symbols",
@@ -711,4 +712,10 @@ def: F<"Qy">;
 // Hidden option used for testing MIPS multi-GOT implementation.
 defm mips_got_size:
   Eq<"mips-got-size", "Max size of a single MIPS GOT. 0x10000 by default.">,
+  Flags<[HelpHidden]>;
+
+// Hidden option used to opt-in to additional output checks.
+defm check_dynamic_relocations: BB<"check-dynamic-relocations",
+    "Perform additional validation of the written dynamic relocations",
+    "Do not perform additional validation of the written dynamic relocations">,
   Flags<[HelpHidden]>;

@@ -2041,6 +2041,10 @@ static bool despeculateCountZeros(IntrinsicInst *CountZeros,
   if (Ty->isVectorTy() || SizeInBits > DL->getLargestLegalIntTypeSizeInBits())
     return false;
 
+  // Bail if the value is never zero.
+  if (llvm::isKnownNonZero(CountZeros->getOperand(0), *DL))
+    return false;
+
   // The intrinsic will be sunk behind a compare against zero and branch.
   BasicBlock *StartBlock = CountZeros->getParent();
   BasicBlock *CallBlock = StartBlock->splitBasicBlock(CountZeros, "cond.false");
@@ -6465,6 +6469,10 @@ bool CodeGenPrepare::optimizeLoadExt(LoadInst *Load) {
 
   EVT LoadResultVT = TLI->getValueType(*DL, Load->getType());
   unsigned BitWidth = LoadResultVT.getSizeInBits();
+  // If the BitWidth is 0, do not try to optimize the type
+  if (BitWidth == 0)
+    return false;
+
   APInt DemandBits(BitWidth, 0);
   APInt WidestAndBits(BitWidth, 0);
 
@@ -6988,7 +6996,8 @@ bool CodeGenPrepare::optimizeSwitchInst(SwitchInst *SI) {
   Value *Cond = SI->getCondition();
   Type *OldType = Cond->getType();
   LLVMContext &Context = Cond->getContext();
-  MVT RegType = TLI->getRegisterType(Context, TLI->getValueType(*DL, OldType));
+  EVT OldVT = TLI->getValueType(*DL, OldType);
+  MVT RegType = TLI->getRegisterType(Context, OldVT);
   unsigned RegWidth = RegType.getSizeInBits();
 
   if (RegWidth <= cast<IntegerType>(OldType)->getBitWidth())
@@ -7002,14 +7011,21 @@ bool CodeGenPrepare::optimizeSwitchInst(SwitchInst *SI) {
   // where N is the number of cases in the switch.
   auto *NewType = Type::getIntNTy(Context, RegWidth);
 
-  // Zero-extend the switch condition and case constants unless the switch
-  // condition is a function argument that is already being sign-extended.
-  // In that case, we can avoid an unnecessary mask/extension by sign-extending
-  // everything instead.
+  // Extend the switch condition and case constants using the target preferred
+  // extend unless the switch condition is a function argument with an extend
+  // attribute. In that case, we can avoid an unnecessary mask/extension by
+  // matching the argument extension instead.
   Instruction::CastOps ExtType = Instruction::ZExt;
-  if (auto *Arg = dyn_cast<Argument>(Cond))
+  // Some targets prefer SExt over ZExt.
+  if (TLI->isSExtCheaperThanZExt(OldVT, RegType))
+    ExtType = Instruction::SExt;
+
+  if (auto *Arg = dyn_cast<Argument>(Cond)) {
     if (Arg->hasSExtAttr())
       ExtType = Instruction::SExt;
+    if (Arg->hasZExtAttr())
+      ExtType = Instruction::ZExt;
+  }
 
   auto *ExtInst = CastInst::Create(ExtType, Cond, NewType);
   ExtInst->insertBefore(SI);
@@ -7986,7 +8002,9 @@ bool CodeGenPrepare::fixupDbgValue(Instruction *I) {
 
   // Does this dbg.value refer to a sunk address calculation?
   bool AnyChange = false;
-  for (Value *Location : DVI.getValues()) {
+  SmallDenseSet<Value *> LocationOps(DVI.location_ops().begin(),
+                                     DVI.location_ops().end());
+  for (Value *Location : LocationOps) {
     WeakTrackingVH SunkAddrVH = SunkAddrs[Location];
     Value *SunkAddr = SunkAddrVH.pointsToAliveValue() ? SunkAddrVH : nullptr;
     if (SunkAddr) {

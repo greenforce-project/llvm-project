@@ -206,9 +206,10 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
   if (!EnableSymbolicExecution)
     return false;
 
+  BasicBlock *Predecessor = L->getLoopPredecessor();
   BasicBlock *Latch = L->getLoopLatch();
 
-  if (!Latch)
+  if (!Predecessor || !Latch)
     return false;
 
   LoopBlocksRPO RPOT(L);
@@ -227,7 +228,7 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
   SmallPtrSet<BasicBlock *, 4> LiveBlocks;
   // Edges that are reachable on the 1st iteration.
   DenseSet<BasicBlockEdge> LiveEdges;
-  LiveBlocks.insert(L->getHeader());
+  LiveBlocks.insert(Header);
 
   SmallPtrSet<BasicBlock *, 4> Visited;
   auto MarkLiveEdge = [&](BasicBlock *From, BasicBlock *To) {
@@ -245,23 +246,33 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
       MarkLiveEdge(BB, Succ);
   };
 
-  // Check if there is only one predecessor on 1st iteration. Note that because
-  // we iterate in RPOT, we have already visited all its (non-latch)
-  // predecessors.
-  auto GetSolePredecessorOnFirstIteration = [&](BasicBlock * BB)->BasicBlock * {
+  // Check if there is only one value coming from all live predecessor blocks.
+  // Note that because we iterate in RPOT, we have already visited all its
+  // (non-latch) predecessors.
+  auto GetSoleInputOnFirstIteration = [&](PHINode & PN)->Value * {
+    BasicBlock *BB = PN.getParent();
+    bool HasLivePreds = false;
+    (void)HasLivePreds;
     if (BB == Header)
-      return L->getLoopPredecessor();
-    BasicBlock *OnlyPred = nullptr;
+      return PN.getIncomingValueForBlock(Predecessor);
+    Value *OnlyInput = nullptr;
     for (auto *Pred : predecessors(BB))
-      if (OnlyPred != Pred && LiveEdges.count({ Pred, BB })) {
-        // 2 live preds.
-        if (OnlyPred)
+      if (LiveEdges.count({ Pred, BB })) {
+        HasLivePreds = true;
+        Value *Incoming = PN.getIncomingValueForBlock(Pred);
+        // Skip undefs. If they are present, we can assume they are equal to
+        // the non-undef input.
+        if (isa<UndefValue>(Incoming))
+          continue;
+        // Two inputs.
+        if (OnlyInput && OnlyInput != Incoming)
           return nullptr;
-        OnlyPred = Pred;
+        OnlyInput = Incoming;
       }
 
-    assert(OnlyPred && "No live predecessors?");
-    return OnlyPred;
+    assert(HasLivePreds && "No live predecessors?");
+    // If all incoming live value were undefs, return undef.
+    return OnlyInput ? OnlyInput : UndefValue::get(PN.getType());
   };
   DenseMap<Value *, Value *> FirstIterValue;
 
@@ -275,7 +286,7 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
   //     iteration, mark this successor live.
   // 3b. If we cannot prove it, conservatively assume that all successors are
   //     live.
-  auto &DL = L->getHeader()->getModule()->getDataLayout();
+  auto &DL = Header->getModule()->getDataLayout();
   const SimplifyQuery SQ(DL);
   for (auto *BB : RPOT) {
     Visited.insert(BB);
@@ -290,49 +301,80 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
       continue;
     }
 
-    // If this block has only one live pred, map its phis onto their SCEVs.
-    if (auto *OnlyPred = GetSolePredecessorOnFirstIteration(BB))
-      for (auto &PN : BB->phis()) {
-        if (!PN.getType()->isIntegerTy())
-          continue;
-        auto *Incoming = PN.getIncomingValueForBlock(OnlyPred);
-        if (DT.dominates(Incoming, BB->getTerminator())) {
-          Value *FirstIterV =
-              getValueOnFirstIteration(Incoming, FirstIterValue, SQ);
-          FirstIterValue[&PN] = FirstIterV;
-        }
+    // If Phi has only one input from all live input blocks, use it.
+    for (auto &PN : BB->phis()) {
+      if (!PN.getType()->isIntegerTy())
+        continue;
+      auto *Incoming = GetSoleInputOnFirstIteration(PN);
+      if (Incoming && DT.dominates(Incoming, BB->getTerminator())) {
+        Value *FirstIterV =
+            getValueOnFirstIteration(Incoming, FirstIterValue, SQ);
+        FirstIterValue[&PN] = FirstIterV;
       }
+    }
 
     using namespace PatternMatch;
     ICmpInst::Predicate Pred;
     Value *LHS, *RHS;
     BasicBlock *IfTrue, *IfFalse;
     auto *Term = BB->getTerminator();
-    // TODO: Handle switch.
-    if (!match(Term, m_Br(m_ICmp(Pred, m_Value(LHS), m_Value(RHS)),
-                          m_BasicBlock(IfTrue), m_BasicBlock(IfFalse)))) {
-      MarkAllSuccessorsLive(BB);
-      continue;
-    }
+    if (match(Term, m_Br(m_ICmp(Pred, m_Value(LHS), m_Value(RHS)),
+                         m_BasicBlock(IfTrue), m_BasicBlock(IfFalse)))) {
+      if (!LHS->getType()->isIntegerTy()) {
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
 
-    if (!LHS->getType()->isIntegerTy()) {
+      // Can we prove constant true or false for this condition?
+      LHS = getValueOnFirstIteration(LHS, FirstIterValue, SQ);
+      RHS = getValueOnFirstIteration(RHS, FirstIterValue, SQ);
+      auto *KnownCondition = SimplifyICmpInst(Pred, LHS, RHS, SQ);
+      if (!KnownCondition) {
+        // Failed to simplify.
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
+      if (isa<UndefValue>(KnownCondition)) {
+        // TODO: According to langref, branching by undef is undefined behavior.
+        // It means that, theoretically, we should be able to just continue
+        // without marking any successors as live. However, we are not certain
+        // how correct our compiler is at handling such cases. So we are being
+        // very conservative here.
+        //
+        // If there is a non-loop successor, always assume this branch leaves the
+        // loop. Otherwise, arbitrarily take IfTrue.
+        //
+        // Once we are certain that branching by undef is handled correctly by
+        // other transforms, we should not mark any successors live here.
+        if (L->contains(IfTrue) && L->contains(IfFalse))
+          MarkLiveEdge(BB, IfTrue);
+        continue;
+      }
+      auto *ConstCondition = dyn_cast<ConstantInt>(KnownCondition);
+      if (!ConstCondition) {
+        // Non-constant condition, cannot analyze any further.
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
+      if (ConstCondition->isAllOnesValue())
+        MarkLiveEdge(BB, IfTrue);
+      else
+        MarkLiveEdge(BB, IfFalse);
+    } else if (SwitchInst *SI = dyn_cast<SwitchInst>(Term)) {
+      auto *SwitchValue = SI->getCondition();
+      auto *SwitchValueOnFirstIter =
+          getValueOnFirstIteration(SwitchValue, FirstIterValue, SQ);
+      auto *ConstSwitchValue = dyn_cast<ConstantInt>(SwitchValueOnFirstIter);
+      if (!ConstSwitchValue) {
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
+      auto CaseIterator = SI->findCaseValue(ConstSwitchValue);
+      MarkLiveEdge(BB, CaseIterator->getCaseSuccessor());
+    } else {
       MarkAllSuccessorsLive(BB);
       continue;
     }
-
-    // Can we prove constant true or false for this condition?
-    LHS = getValueOnFirstIteration(LHS, FirstIterValue, SQ);
-    RHS = getValueOnFirstIteration(RHS, FirstIterValue, SQ);
-    auto *KnownCondition =
-        dyn_cast_or_null<ConstantInt>(SimplifyICmpInst(Pred, LHS, RHS, SQ));
-    if (!KnownCondition) {
-      MarkAllSuccessorsLive(BB);
-      continue;
-    }
-    if (KnownCondition->isAllOnesValue())
-      MarkLiveEdge(BB, IfTrue);
-    else
-      MarkLiveEdge(BB, IfFalse);
   }
 
   // We can break the latch if it wasn't live.

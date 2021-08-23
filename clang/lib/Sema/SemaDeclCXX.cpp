@@ -7292,6 +7292,9 @@ void Sema::CheckExplicitlyDefaultedFunction(Scope *S, FunctionDecl *FD) {
     return;
   }
 
+  if (DefKind.isComparison())
+    UnusedPrivateFields.clear();
+
   if (DefKind.isSpecialMember()
           ? CheckExplicitlyDefaultedSpecialMember(cast<CXXMethodDecl>(FD),
                                                   DefKind.asSpecialMember())
@@ -7865,15 +7868,6 @@ private:
                "builtin comparison for different types?");
         assert(Best->BuiltinParamTypes[2].isNull() &&
                "invalid builtin comparison");
-
-        // The builtin operator for relational comparisons on function
-        // pointers is the only known case which cannot be used.
-        if (OO != OO_EqualEqual && T->isFunctionPointerType()) {
-          if (Diagnose == ExplainDeleted)
-            S.Diag(Subobj.Loc, diag::note_defaulted_comparison_selected_invalid)
-                << Subobj.Kind << Subobj.Decl << T;
-          return Result::deleted();
-        }
 
         if (NeedsDeducing) {
           Optional<ComparisonCategoryType> Cat =
@@ -12478,6 +12472,8 @@ bool Sema::CheckUsingDeclRedeclaration(SourceLocation UsingLoc,
     return false;
   }
 
+  const NestedNameSpecifier *CNNS =
+      Context.getCanonicalNestedNameSpecifier(Qual);
   for (LookupResult::iterator I = Prev.begin(), E = Prev.end(); I != E; ++I) {
     NamedDecl *D = *I;
 
@@ -12503,8 +12499,7 @@ bool Sema::CheckUsingDeclRedeclaration(SourceLocation UsingLoc,
     // using decls differ if they name different scopes (but note that
     // template instantiation can cause this check to trigger when it
     // didn't before instantiation).
-    if (Context.getCanonicalNestedNameSpecifier(Qual) !=
-        Context.getCanonicalNestedNameSpecifier(DQual))
+    if (CNNS != Context.getCanonicalNestedNameSpecifier(DQual))
       continue;
 
     Diag(NameLoc, diag::err_using_decl_redeclaration) << SS.getRange();
@@ -13199,6 +13194,16 @@ void Sema::setupImplicitSpecialMemberType(CXXMethodDecl *SpecialMem,
 
   auto QT = Context.getFunctionType(ResultTy, Args, EPI);
   SpecialMem->setType(QT);
+
+  // During template instantiation of implicit special member functions we need
+  // a reliable TypeSourceInfo for the function prototype in order to allow
+  // functions to be substituted.
+  if (inTemplateInstantiation() &&
+      cast<CXXRecordDecl>(SpecialMem->getParent())->isLambda()) {
+    TypeSourceInfo *TSI =
+        Context.getTrivialTypeSourceInfo(SpecialMem->getType());
+    SpecialMem->setTypeSourceInfo(TSI);
+  }
 }
 
 CXXConstructorDecl *Sema::DeclareImplicitDefaultConstructor(
@@ -14877,12 +14882,18 @@ CXXConstructorDecl *Sema::DeclareImplicitCopyConstructor(
 
   setupImplicitSpecialMemberType(CopyConstructor, Context.VoidTy, ArgType);
 
+  // During template instantiation of special member functions we need a
+  // reliable TypeSourceInfo for the parameter types in order to allow functions
+  // to be substituted.
+  TypeSourceInfo *TSI = nullptr;
+  if (inTemplateInstantiation() && ClassDecl->isLambda())
+    TSI = Context.getTrivialTypeSourceInfo(ArgType);
+
   // Add the parameter to the constructor.
-  ParmVarDecl *FromParam = ParmVarDecl::Create(Context, CopyConstructor,
-                                               ClassLoc, ClassLoc,
-                                               /*IdentifierInfo=*/nullptr,
-                                               ArgType, /*TInfo=*/nullptr,
-                                               SC_None, nullptr);
+  ParmVarDecl *FromParam =
+      ParmVarDecl::Create(Context, CopyConstructor, ClassLoc, ClassLoc,
+                          /*IdentifierInfo=*/nullptr, ArgType,
+                          /*TInfo=*/TSI, SC_None, nullptr);
   CopyConstructor->setParams(FromParam);
 
   CopyConstructor->setTrivial(

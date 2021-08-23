@@ -29,6 +29,8 @@
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/State.h"
 
+#include <bitset>
+
 using namespace lldb;
 using namespace lldb_private;
 
@@ -1041,7 +1043,7 @@ public:
     UnixSignalsSP signals = m_exe_ctx.GetProcessPtr()->GetUnixSignals();
     int signo = signals->GetFirstSignalNumber();
     while (signo != LLDB_INVALID_SIGNAL_NUMBER) {
-      request.AddCompletion(signals->GetSignalAsCString(signo), "");
+      request.TryCompleteCurrentArg(signals->GetSignalAsCString(signo));
       signo = signals->GetNextSignalNumber(signo);
     }
   }
@@ -1161,17 +1163,69 @@ protected:
 // CommandObjectProcessSaveCore
 #pragma mark CommandObjectProcessSaveCore
 
+static constexpr OptionEnumValueElement g_corefile_save_style[] = {
+    {eSaveCoreFull, "full", "Create a core file with all memory saved"},
+    {eSaveCoreDirtyOnly, "modified-memory",
+     "Create a corefile with only modified memory saved"}};
+
+static constexpr OptionEnumValues SaveCoreStyles() {
+  return OptionEnumValues(g_corefile_save_style);
+}
+
+#define LLDB_OPTIONS_process_save_core
+#include "CommandOptions.inc"
+
 class CommandObjectProcessSaveCore : public CommandObjectParsed {
 public:
   CommandObjectProcessSaveCore(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "process save-core",
                             "Save the current process as a core file using an "
                             "appropriate file type.",
-                            "process save-core FILE",
+                            "process save-core [-s corefile-style] FILE",
                             eCommandRequiresProcess | eCommandTryTargetAPILock |
                                 eCommandProcessMustBeLaunched) {}
 
   ~CommandObjectProcessSaveCore() override = default;
+
+  Options *GetOptions() override { return &m_options; }
+
+  class CommandOptions : public Options {
+  public:
+    CommandOptions()
+        : Options(), m_requested_save_core_style(eSaveCoreUnspecified) {}
+
+    ~CommandOptions() override = default;
+
+    llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
+      return llvm::makeArrayRef(g_process_save_core_options);
+    }
+
+    Status SetOptionValue(uint32_t option_idx, llvm::StringRef option_arg,
+                          ExecutionContext *execution_context) override {
+      const int short_option = m_getopt_table[option_idx].val;
+      Status error;
+
+      switch (short_option) {
+      case 's':
+        m_requested_save_core_style =
+            (lldb::SaveCoreStyle)OptionArgParser::ToOptionEnum(
+                option_arg, GetDefinitions()[option_idx].enum_values,
+                eSaveCoreUnspecified, error);
+        break;
+      default:
+        llvm_unreachable("Unimplemented option");
+      }
+
+      return {};
+    }
+
+    void OptionParsingStarting(ExecutionContext *execution_context) override {
+      m_requested_save_core_style = eSaveCoreUnspecified;
+    }
+
+    // Instance variables to hold the values for command options.
+    SaveCoreStyle m_requested_save_core_style;
+  };
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
@@ -1179,8 +1233,21 @@ protected:
     if (process_sp) {
       if (command.GetArgumentCount() == 1) {
         FileSpec output_file(command.GetArgumentAtIndex(0));
-        Status error = PluginManager::SaveCore(process_sp, output_file);
+        SaveCoreStyle corefile_style = m_options.m_requested_save_core_style;
+        Status error =
+            PluginManager::SaveCore(process_sp, output_file, corefile_style);
         if (error.Success()) {
+          if (corefile_style == SaveCoreStyle::eSaveCoreDirtyOnly) {
+            result.AppendMessageWithFormat(
+                "\nModified-memory only corefile "
+                "created.  This corefile may not show \n"
+                "library/framework/app binaries "
+                "on a different system, or when \n"
+                "those binaries have "
+                "been updated/modified. Copies are not included\n"
+                "in this corefile.  Use --style full to include all "
+                "process memory.\n");
+          }
           result.SetStatus(eReturnStatusSuccessFinishResult);
         } else {
           result.AppendErrorWithFormat(
@@ -1197,6 +1264,8 @@ protected:
 
     return result.Succeeded();
   }
+
+  CommandOptions m_options;
 };
 
 // CommandObjectProcessStatus
@@ -1274,6 +1343,18 @@ protected:
                              num_frames, num_frames_with_source, stop_format);
 
     if (m_options.m_verbose) {
+      addr_t code_mask = process->GetCodeAddressMask();
+      addr_t data_mask = process->GetDataAddressMask();
+      if (code_mask != 0) {
+        int bits = std::bitset<64>(~code_mask).count();
+        result.AppendMessageWithFormat(
+            "Addressable code address mask: 0x%" PRIx64 "\n", code_mask);
+        result.AppendMessageWithFormat(
+            "Addressable data address mask: 0x%" PRIx64 "\n", data_mask);
+        result.AppendMessageWithFormat(
+            "Number of bits used in addressing (code): %d\n", bits);
+      }
+
       PlatformSP platform_sp = process->GetTarget().GetPlatform();
       if (!platform_sp) {
         result.AppendError("Couldn'retrieve the target's platform");
@@ -1582,7 +1663,7 @@ public:
     TraceSP trace_sp = process_sp->GetTarget().GetTrace();
 
     if (llvm::Error err = trace_sp->Stop())
-      result.SetError(toString(std::move(err)));
+      result.AppendError(toString(std::move(err)));
     else
       result.SetStatus(eReturnStatusSuccessFinishResult);
 
