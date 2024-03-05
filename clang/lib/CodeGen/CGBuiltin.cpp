@@ -17091,37 +17091,24 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
     }
     return Builder.CreateCall(CGM.getIntrinsic(ID), Ops, "");
   }
-  // Rotate and insert under mask operation.
-  // __rldimi(rs, is, shift, mask)
-  // (rotl64(rs, shift) & mask) | (is & ~mask)
-  // __rlwimi(rs, is, shift, mask)
-  // (rotl(rs, shift) & mask) | (is & ~mask)
   case PPC::BI__builtin_ppc_rldimi:
   case PPC::BI__builtin_ppc_rlwimi: {
     Value *Op0 = EmitScalarExpr(E->getArg(0));
     Value *Op1 = EmitScalarExpr(E->getArg(1));
     Value *Op2 = EmitScalarExpr(E->getArg(2));
     Value *Op3 = EmitScalarExpr(E->getArg(3));
-    llvm::Type *Ty = Op0->getType();
-    Function *F = CGM.getIntrinsic(Intrinsic::fshl, Ty);
-    if (BuiltinID == PPC::BI__builtin_ppc_rldimi)
-      Op2 = Builder.CreateZExt(Op2, Int64Ty);
-    Value *Shift = Builder.CreateCall(F, {Op0, Op0, Op2});
-    Value *X = Builder.CreateAnd(Shift, Op3);
-    Value *Y = Builder.CreateAnd(Op1, Builder.CreateNot(Op3));
-    return Builder.CreateOr(X, Y);
+    return Builder.CreateCall(
+        CGM.getIntrinsic(BuiltinID == PPC::BI__builtin_ppc_rldimi
+                             ? Intrinsic::ppc_rldimi
+                             : Intrinsic::ppc_rlwimi),
+        {Op0, Op1, Op2, Op3});
   }
-  // Rotate and insert under mask operation.
-  // __rlwnm(rs, shift, mask)
-  // rotl(rs, shift) & mask
   case PPC::BI__builtin_ppc_rlwnm: {
     Value *Op0 = EmitScalarExpr(E->getArg(0));
     Value *Op1 = EmitScalarExpr(E->getArg(1));
     Value *Op2 = EmitScalarExpr(E->getArg(2));
-    llvm::Type *Ty = Op0->getType();
-    Function *F = CGM.getIntrinsic(Intrinsic::fshl, Ty);
-    Value *Shift = Builder.CreateCall(F, {Op0, Op0, Op1});
-    return Builder.CreateAnd(Shift, Op2);
+    return Builder.CreateCall(CGM.getIntrinsic(Intrinsic::ppc_rlwnm),
+                              {Op0, Op1, Op2});
   }
   case PPC::BI__builtin_ppc_poppar4:
   case PPC::BI__builtin_ppc_poppar8: {
@@ -18056,6 +18043,25 @@ Value *CodeGenFunction::EmitHLSLBuiltinExpr(unsigned BuiltinID,
     return Builder.CreateIntrinsic(
         /*ReturnType*/ Op0->getType(), Intrinsic::dx_frac,
         ArrayRef<Value *>{Op0}, nullptr, "dx.frac");
+  }
+  case Builtin::BI__builtin_hlsl_mad: {
+    Value *M = EmitScalarExpr(E->getArg(0));
+    Value *A = EmitScalarExpr(E->getArg(1));
+    Value *B = EmitScalarExpr(E->getArg(2));
+    if (E->getArg(0)->getType()->hasFloatingRepresentation()) {
+      return Builder.CreateIntrinsic(
+          /*ReturnType*/ M->getType(), Intrinsic::fmuladd,
+          ArrayRef<Value *>{M, A, B}, nullptr, "dx.fmad");
+    }
+    if (E->getArg(0)->getType()->hasSignedIntegerRepresentation()) {
+      return Builder.CreateIntrinsic(
+          /*ReturnType*/ M->getType(), Intrinsic::dx_imad,
+          ArrayRef<Value *>{M, A, B}, nullptr, "dx.imad");
+    }
+    assert(E->getArg(0)->getType()->hasUnsignedIntegerRepresentation());
+    return Builder.CreateIntrinsic(
+        /*ReturnType*/ M->getType(), Intrinsic::dx_umad,
+        ArrayRef<Value *>{M, A, B}, nullptr, "dx.umad");
   }
   }
   return nullptr;
