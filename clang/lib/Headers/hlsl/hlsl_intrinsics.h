@@ -101,6 +101,118 @@ _HLSL_BUILTIN_ALIAS(__builtin_elementwise_abs)
 double4 abs(double4);
 
 //===----------------------------------------------------------------------===//
+// any builtins
+//===----------------------------------------------------------------------===//
+
+/// \fn bool any(T x)
+/// \brief Returns True if any components of the \a x parameter are non-zero;
+/// otherwise, false. \param x The input value.
+
+#ifdef __HLSL_ENABLE_16_BIT
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int16_t);
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int16_t2);
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int16_t3);
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int16_t4);
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint16_t);
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint16_t2);
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint16_t3);
+_HLSL_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint16_t4);
+#endif
+
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(half);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(half2);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(half3);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(half4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(bool);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(bool2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(bool3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(bool4);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(float);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(float2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(float3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(float4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int64_t);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int64_t2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int64_t3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(int64_t4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint64_t);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint64_t2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint64_t3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(uint64_t4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(double);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(double2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(double3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_any)
+bool any(double4);
+
+//===----------------------------------------------------------------------===//
 // ceil builtins
 //===----------------------------------------------------------------------===//
 
@@ -276,6 +388,70 @@ _HLSL_BUILTIN_ALIAS(__builtin_hlsl_dot)
 uint64_t dot(uint64_t3, uint64_t3);
 _HLSL_BUILTIN_ALIAS(__builtin_hlsl_dot)
 uint64_t dot(uint64_t4, uint64_t4);
+
+//===----------------------------------------------------------------------===//
+// exp builtins
+//===----------------------------------------------------------------------===//
+
+/// \fn T exp(T x)
+/// \brief Returns the base-e exponential, or \a e**x, of the specified value.
+/// \param x The specified input value.
+///
+/// The return value is the base-e exponential of the \a x parameter.
+
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+half exp(half);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+half2 exp(half2);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+half3 exp(half3);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+half4 exp(half4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+float exp(float);
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+float2 exp(float2);
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+float3 exp(float3);
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp)
+float4 exp(float4);
+
+//===----------------------------------------------------------------------===//
+// exp2 builtins
+//===----------------------------------------------------------------------===//
+
+/// \fn T exp2(T x)
+/// \brief Returns the base 2 exponential, or \a 2**x, of the specified value.
+/// \param x The specified input value.
+///
+/// The base 2 exponential of the \a x parameter.
+
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+half exp2(half);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+half2 exp2(half2);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+half3 exp2(half3);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+half4 exp2(half4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+float exp2(float);
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+float2 exp2(float2);
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+float3 exp2(float3);
+_HLSL_BUILTIN_ALIAS(__builtin_elementwise_exp2)
+float4 exp2(float4);
 
 //===----------------------------------------------------------------------===//
 // floor builtins
@@ -935,6 +1111,47 @@ _HLSL_BUILTIN_ALIAS(__builtin_elementwise_bitreverse)
 uint64_t3 reversebits(uint64_t3);
 _HLSL_BUILTIN_ALIAS(__builtin_elementwise_bitreverse)
 uint64_t4 reversebits(uint64_t4);
+
+//===----------------------------------------------------------------------===//
+// rcp builtins
+//===----------------------------------------------------------------------===//
+
+/// \fn T rcp(T x)
+/// \brief Calculates a fast, approximate, per-component reciprocal ie 1 / \a x.
+/// \param x The specified input value.
+///
+/// The return value is the reciprocal of the \a x parameter.
+
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+half rcp(half);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+half2 rcp(half2);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+half3 rcp(half3);
+_HLSL_16BIT_AVAILABILITY(shadermodel, 6.2)
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+half4 rcp(half4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+float rcp(float);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+float2 rcp(float2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+float3 rcp(float3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+float4 rcp(float4);
+
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+double rcp(double);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+double2 rcp(double2);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+double3 rcp(double3);
+_HLSL_BUILTIN_ALIAS(__builtin_hlsl_elementwise_rcp)
+double4 rcp(double4);
 
 //===----------------------------------------------------------------------===//
 // round builtins
