@@ -4818,7 +4818,7 @@ static bool callsShareTOCBase(const Function *Caller,
   // If the callee is preemptable, then the static linker will use a plt-stub
   // which saves the toc to the stack, and needs a nop after the call
   // instruction to convert to a toc-restore.
-  if (!TM.shouldAssumeDSOLocal(*Caller->getParent(), CalleeGV))
+  if (!TM.shouldAssumeDSOLocal(CalleeGV))
     return false;
 
   // Functions with PC Relative enabled may clobber the TOC in the same DSO.
@@ -5420,10 +5420,9 @@ static SDValue transformCallee(const SDValue &Callee, SelectionDAG &DAG,
   // Returns true if the callee is local, and false otherwise.
   auto isLocalCallee = [&]() {
     const GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee);
-    const Module *Mod = DAG.getMachineFunction().getFunction().getParent();
     const GlobalValue *GV = G ? G->getGlobal() : nullptr;
 
-    return DAG.getTarget().shouldAssumeDSOLocal(*Mod, GV) &&
+    return DAG.getTarget().shouldAssumeDSOLocal(GV) &&
            !isa_and_nonnull<GlobalIFunc>(GV);
   };
 
@@ -8520,7 +8519,8 @@ bool PPCTargetLowering::directMoveIsProfitable(const SDValue &Op) const {
   // If there is no LXSIBZX/LXSIHZX, like Power8,
   // prefer direct move if the memory size is 1 or 2 bytes.
   MachineMemOperand *MMO = cast<LoadSDNode>(Origin)->getMemOperand();
-  if (!Subtarget.hasP9Vector() && MMO->getSize() <= 2)
+  if (!Subtarget.hasP9Vector() &&
+      (!MMO->getSize().hasValue() || MMO->getSize().getValue() <= 2))
     return true;
 
   for (SDNode::use_iterator UI = Origin->use_begin(),
@@ -15115,7 +15115,7 @@ SDValue PPCTargetLowering::expandVSXLoadForLE(SDNode *N,
     // If the MMO suggests this isn't a load of a full vector, leave
     // things alone.  For a built-in, we have to make the change for
     // correctness, so if there is a size problem that will be a bug.
-    if (MMO->getSize() < 16)
+    if (!MMO->getSize().hasValue() || MMO->getSize().getValue() < 16)
       return SDValue();
     break;
   }
@@ -15183,7 +15183,7 @@ SDValue PPCTargetLowering::expandVSXStoreForLE(SDNode *N,
     // If the MMO suggests this isn't a store of a full vector, leave
     // things alone.  For a built-in, we have to make the change for
     // correctness, so if there is a size problem that will be a bug.
-    if (MMO->getSize() < 16)
+    if (!MMO->getSize().hasValue() || MMO->getSize().getValue() < 16)
       return SDValue();
     break;
   }
@@ -18045,7 +18045,7 @@ bool PPCTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
       return false;
 
   // If the function is local then we have a good chance at tail-calling it
-  return getTargetMachine().shouldAssumeDSOLocal(*Caller->getParent(), Callee);
+  return getTargetMachine().shouldAssumeDSOLocal(Callee);
 }
 
 bool PPCTargetLowering::
