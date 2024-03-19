@@ -250,6 +250,10 @@ Improvements to Clang's diagnostics
   such as attempting to call ``free`` on an unallocated object. Fixes
   `#79443 <https://github.com/llvm/llvm-project/issues/79443>`_.
 
+- Clang no longer warns when the ``bitand`` operator is used with boolean
+  operands, distinguishing it from potential typographical errors or unintended
+  bitwise operations. Fixes #GH77601.
+
 Improvements to Clang's time-trace
 ----------------------------------
 
@@ -279,6 +283,9 @@ Bug Fixes in This Version
 - Clang no longer produces a false-positive `-Wunused-variable` warning
   for variables created through copy initialization having side-effects in C++17 and later.
   Fixes (#GH64356) (#GH79518).
+
+- Fix value of predefined macro ``__FUNCTION__`` in MSVC compatibility mode.
+  Fixes (#GH66114).
 
 - Clang now emits errors for explicit specializations/instatiations of lambda call
   operator.
@@ -441,12 +448,34 @@ Arm and AArch64 Support
   like ``target_version`` or ``target_clones``.
 - Support has been added for the following processors (-mcpu identifiers in parenthesis):
     * Arm Cortex-A78AE (cortex-a78ae).
+    * Arm Cortex-A520AE (cortex-a520ae).
+    * Arm Cortex-A720AE (cortex-a720ae).
 
 Android Support
 ^^^^^^^^^^^^^^^
 
 Windows Support
 ^^^^^^^^^^^^^^^
+
+- Clang-cl now supports function targets with intrinsic headers. This allows
+  for runtime feature detection of intrinsics. Previously under clang-cl
+  ``immintrin.h`` and similar intrinsic headers would only include the intrinsics
+  if building with that feature enabled at compile time, e.g. ``avxintrin.h``
+  would only be included if AVX was enabled at compile time. This was done to work
+  around include times from MSVC STL including ``intrin.h`` under clang-cl.
+  Clang-cl now provides ``intrin0.h`` for MSVC STL and therefore all intrinsic
+  features without requiring enablement at compile time.
+  Fixes: (`#53520 <https://github.com/llvm/llvm-project/issues/53520>`_)
+
+- Improved compile times with MSVC STL. MSVC provides ``intrin0.h`` which is a
+  header that only includes intrinsics that are used by MSVC STL to avoid the
+  use of ``intrin.h``. MSVC STL when compiled under clang uses ``intrin.h``
+  instead. Clang-cl now provides ``intrin0.h`` for the same compiler throughput
+  purposes as MSVC. Clang-cl also provides ``yvals_core.h`` to redefine
+  ``_STL_INTRIN_HEADER`` to expand to ``intrin0.h`` instead of ``intrin.h``.
+  This also means that if all intrinsic features are enabled at compile time
+  including STL headers will no longer slow down compile times since ``intrin.h``
+  is not included from MSVC STL.
 
 LoongArch Support
 ^^^^^^^^^^^^^^^^^
@@ -546,6 +575,8 @@ Python Binding Changes
 ----------------------
 
 - Exposed `CXRewriter` API as `class Rewriter`.
+- Add some missing kinds from Index.h (CursorKind: 149-156, 272-320, 420-437.
+  TemplateArgumentKind: 5-9. TypeKind: 161-175 and 178).
 
 OpenMP Support
 --------------

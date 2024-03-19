@@ -2529,6 +2529,23 @@ static SDValue foldAddSubBoolOfMaskedVal(SDNode *N, SelectionDAG &DAG) {
   return DAG.getNode(IsAdd ? ISD::SUB : ISD::ADD, DL, VT, C1, LowBit);
 }
 
+// Attempt to form avgceilu(A, B) from (A | B) - ((A ^ B) >> 1)
+static SDValue combineFixedwidthToAVGCEILU(SDNode *N, SelectionDAG &DAG) {
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+  SDValue N0 = N->getOperand(0);
+  EVT VT = N0.getValueType();
+  SDLoc DL(N);
+  if (TLI.isOperationLegal(ISD::AVGCEILU, VT)) {
+    SDValue A, B;
+    if (sd_match(N, m_Sub(m_Or(m_Value(A), m_Value(B)),
+                          m_Srl(m_Xor(m_Deferred(A), m_Deferred(B)),
+                                m_SpecificInt(1))))) {
+      return DAG.getNode(ISD::AVGCEILU, DL, VT, A, B);
+    }
+  }
+  return SDValue();
+}
+
 /// Try to fold a 'not' shifted sign-bit with add/sub with constant operand into
 /// a shift and add with a different constant.
 static SDValue foldAddSubOfSignBit(SDNode *N, SelectionDAG &DAG) {
@@ -2703,11 +2720,11 @@ SDValue DAGCombiner::visitADDLike(SDNode *N) {
   SDValue A, B, C;
 
   // fold ((0-A) + B) -> B-A
-  if (sd_match(N0, m_Sub(m_Zero(), m_Value(A))))
+  if (sd_match(N0, m_Neg(m_Value(A))))
     return DAG.getNode(ISD::SUB, DL, VT, N1, A);
 
   // fold (A + (0-B)) -> A-B
-  if (sd_match(N1, m_Sub(m_Zero(), m_Value(B))))
+  if (sd_match(N1, m_Neg(m_Value(B))))
     return DAG.getNode(ISD::SUB, DL, VT, N0, B);
 
   // fold (A+(B-A)) -> B
@@ -2820,6 +2837,23 @@ SDValue DAGCombiner::visitADDLike(SDNode *N) {
   return SDValue();
 }
 
+// Attempt to form avgflooru(A, B) from (A & B) + ((A ^ B) >> 1)
+static SDValue combineFixedwidthToAVGFLOORU(SDNode *N, SelectionDAG &DAG) {
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+  SDValue N0 = N->getOperand(0);
+  EVT VT = N0.getValueType();
+  SDLoc DL(N);
+  if (TLI.isOperationLegal(ISD::AVGFLOORU, VT)) {
+    SDValue A, B;
+    if (sd_match(N, m_Add(m_And(m_Value(A), m_Value(B)),
+                          m_Srl(m_Xor(m_Deferred(A), m_Deferred(B)),
+                                m_SpecificInt(1))))) {
+      return DAG.getNode(ISD::AVGFLOORU, DL, VT, A, B);
+    }
+  }
+  return SDValue();
+}
+
 SDValue DAGCombiner::visitADD(SDNode *N) {
   SDValue N0 = N->getOperand(0);
   SDValue N1 = N->getOperand(1);
@@ -2833,6 +2867,10 @@ SDValue DAGCombiner::visitADD(SDNode *N) {
     return V;
 
   if (SDValue V = foldAddSubOfSignBit(N, DAG))
+    return V;
+
+  // Try to match AVGFLOORU fixedwidth pattern
+  if (SDValue V = combineFixedwidthToAVGFLOORU(N, DAG))
     return V;
 
   // fold (a+b) -> (a|b) iff a and b share no bits.
@@ -3812,7 +3850,7 @@ SDValue DAGCombiner::visitSUB(SDNode *N) {
     return DAG.getNode(ISD::AND, DL, VT, N0, DAG.getNOT(DL, B, VT));
 
   // fold (A - (-B * C)) -> (A + (B * C))
-  if (sd_match(N1, m_OneUse(m_Mul(m_Sub(m_Zero(), m_Value(B)), m_Value(C)))))
+  if (sd_match(N1, m_OneUse(m_Mul(m_Neg(m_Value(B)), m_Value(C)))))
     return DAG.getNode(ISD::ADD, DL, VT, N0,
                        DAG.getNode(ISD::MUL, DL, VT, B, C));
 
@@ -3826,6 +3864,10 @@ SDValue DAGCombiner::visitSUB(SDNode *N) {
     return V;
 
   if (SDValue V = foldAddSubOfSignBit(N, DAG))
+    return V;
+
+  // Try to match AVGCEILU fixedwidth pattern
+  if (SDValue V = combineFixedwidthToAVGCEILU(N, DAG))
     return V;
 
   if (SDValue V = foldAddSubMasked1(false, N0, N1, DAG, SDLoc(N)))
@@ -22422,17 +22464,16 @@ SDValue DAGCombiner::visitEXTRACT_VECTOR_ELT(SDNode *N) {
     //      -> extract_vector_elt b, 0
     // extract_vector_elt (concat_vectors v2i16:a, v2i16:b), 3
     //      -> extract_vector_elt b, 1
-    SDLoc SL(N);
     EVT ConcatVT = VecOp.getOperand(0).getValueType();
     unsigned ConcatNumElts = ConcatVT.getVectorNumElements();
-    SDValue NewIdx = DAG.getConstant(Elt % ConcatNumElts, SL,
+    SDValue NewIdx = DAG.getConstant(Elt % ConcatNumElts, DL,
                                      Index.getValueType());
 
     SDValue ConcatOp = VecOp.getOperand(Elt / ConcatNumElts);
-    SDValue Elt = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, SL,
+    SDValue Elt = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL,
                               ConcatVT.getVectorElementType(),
                               ConcatOp, NewIdx);
-    return DAG.getNode(ISD::BITCAST, SL, ScalarVT, Elt);
+    return DAG.getNode(ISD::BITCAST, DL, ScalarVT, Elt);
   }
 
   // Make sure we found a non-volatile load and the extractelement is
