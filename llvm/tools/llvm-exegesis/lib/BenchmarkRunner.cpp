@@ -303,7 +303,7 @@ private:
       return make_error<Failure>("Failed to attach to the child process: " +
                                  Twine(strerror(errno)));
 
-    if (waitpid(ParentOrChildPID, NULL, 0) == -1) {
+    if (waitpid(ChildPID, NULL, 0) == -1) {
       return make_error<Failure>(
           "Failed to wait for child process to stop after attaching: " +
           Twine(strerror(errno)));
@@ -322,7 +322,7 @@ private:
       return SendError;
 
     int ChildStatus;
-    if (waitpid(ParentOrChildPID, &ChildStatus, 0) == -1) {
+    if (waitpid(ChildPID, &ChildStatus, 0) == -1) {
       return make_error<Failure>(
           "Waiting for the child process to complete failed: " +
           Twine(strerror(errno)));
@@ -365,13 +365,13 @@ private:
     // handlers to run, and calling SIGTERM would mean that ptrace will force
     // it to block in the signal-delivery-stop for the SIGSEGV/other signals,
     // and upon exit.
-    if (kill(ParentOrChildPID, SIGKILL) == -1)
+    if (kill(ChildPID, SIGKILL) == -1)
       return make_error<Failure>("Failed to kill child benchmarking proces: " +
                                  Twine(strerror(errno)));
 
     // Wait for the process to exit so that there are no zombie processes left
     // around.
-    if (waitpid(ParentOrChildPID, NULL, 0) == -1)
+    if (waitpid(ChildPID, NULL, 0) == -1)
       return make_error<Failure>("Failed to wait for process to die: " +
                                  Twine(strerror(errno)));
 
@@ -405,6 +405,7 @@ private:
     if (AddMemDefError)
       return AddMemDefError;
 
+    long ParentTID = SubprocessMemory::getCurrentTID();
     pid_t ParentOrChildPID = fork();
 
     if (ParentOrChildPID == -1) {
@@ -418,7 +419,7 @@ private:
       // Unregister handlers, signal handling is now handled through ptrace in
       // the host process.
       sys::unregisterHandlers();
-      runChildSubprocess(PipeFiles[0], Key);
+      runChildSubprocess(PipeFiles[0], Key, ParentTID);
       // The child process terminates in the above function, so we should never
       // get to this point.
       llvm_unreachable("Child process didn't exit when expected.");
@@ -439,8 +440,8 @@ private:
     setrlimit(RLIMIT_CORE, &rlim);
   }
 
-  [[noreturn]] void runChildSubprocess(int Pipe,
-                                       const BenchmarkKey &Key) const {
+  [[noreturn]] void runChildSubprocess(int Pipe, const BenchmarkKey &Key,
+                                       long ParentTID) const {
     // Disable core dumps in the child process as otherwise everytime we
     // encounter an execution failure like a segmentation fault, we will create
     // a core dump. We report the information directly rather than require the
@@ -497,7 +498,7 @@ private:
 
     Expected<int> AuxMemFDOrError =
         SubprocessMemory::setupAuxiliaryMemoryInSubprocess(
-            Key.MemoryValues, ParentPID, CounterFileDescriptor);
+            Key.MemoryValues, ParentPID, ParentTID, CounterFileDescriptor);
     if (!AuxMemFDOrError)
       exit(ChildProcessExitCodeE::AuxiliaryMemorySetupFailed);
 
