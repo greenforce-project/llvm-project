@@ -398,6 +398,35 @@ bool ByteCodeExprGen<Emitter>::VisitCastExpr(const CastExpr *CE) {
     return true;
   }
 
+  case CK_VectorSplat: {
+    assert(!classify(CE->getType()));
+    assert(classify(SubExpr->getType()));
+    assert(CE->getType()->isVectorType());
+
+    if (DiscardResult)
+      return this->discard(SubExpr);
+
+    assert(Initializing); // FIXME: Not always correct.
+    const auto *VT = CE->getType()->getAs<VectorType>();
+    PrimType ElemT = classifyPrim(SubExpr);
+    unsigned ElemOffset = allocateLocalPrimitive(
+        SubExpr, ElemT, /*IsConst=*/true, /*IsExtended=*/false);
+
+    if (!this->visit(SubExpr))
+      return false;
+    if (!this->emitSetLocal(ElemT, ElemOffset, CE))
+      return false;
+
+    for (unsigned I = 0; I != VT->getNumElements(); ++I) {
+      if (!this->emitGetLocal(ElemT, ElemOffset, CE))
+        return false;
+      if (!this->emitInitElem(ElemT, I, CE))
+        return false;
+    }
+
+    return true;
+  }
+
   case CK_ToVoid:
     return discard(SubExpr);
 
@@ -942,6 +971,11 @@ bool ByteCodeExprGen<Emitter>::visitInitList(ArrayRef<const Expr *> Inits,
 
   unsigned InitIndex = 0;
   for (const Expr *Init : Inits) {
+    // Skip unnamed bitfields.
+    while (InitIndex < R->getNumFields() &&
+           R->getField(InitIndex)->Decl->isUnnamedBitField())
+      ++InitIndex;
+
     if (!this->emitDupPtr(E))
       return false;
 
@@ -1809,7 +1843,7 @@ bool ByteCodeExprGen<Emitter>::VisitCompoundLiteralExpr(
   const Expr *Init = E->getInitializer();
   if (Initializing) {
     // We already have a value, just initialize that.
-    return this->visitInitializer(Init);
+    return this->visitInitializer(Init) && this->emitFinishInit(E);
   }
 
   std::optional<PrimType> T = classify(E->getType());
@@ -1828,7 +1862,7 @@ bool ByteCodeExprGen<Emitter>::VisitCompoundLiteralExpr(
         return this->emitInitGlobal(*T, *GlobalIndex, E);
       }
 
-      return this->visitInitializer(Init);
+      return this->visitInitializer(Init) && this->emitFinishInit(E);
     }
 
     return false;
@@ -1857,7 +1891,7 @@ bool ByteCodeExprGen<Emitter>::VisitCompoundLiteralExpr(
       }
       return this->emitInit(*T, E);
     } else {
-      if (!this->visitInitializer(Init))
+      if (!this->visitInitializer(Init) || !this->emitFinishInit(E))
         return false;
     }
 
@@ -3177,15 +3211,20 @@ bool ByteCodeExprGen<Emitter>::VisitUnaryOperator(const UnaryOperator *E) {
         return false;
       if (!this->emitAddf(getRoundingMode(E), E))
         return false;
-      return this->emitStoreFloat(E);
+      if (!this->emitStoreFloat(E))
+        return false;
+    } else {
+      assert(isIntegralType(*T));
+      if (!this->emitLoad(*T, E))
+        return false;
+      if (!this->emitConst(1, E))
+        return false;
+      if (!this->emitAdd(*T, E))
+        return false;
+      if (!this->emitStore(*T, E))
+        return false;
     }
-    if (!this->emitLoad(*T, E))
-      return false;
-    if (!this->emitConst(1, E))
-      return false;
-    if (!this->emitAdd(*T, E))
-      return false;
-    return this->emitStore(*T, E);
+    return E->isGLValue() || this->emitLoadPop(*T, E);
   }
   case UO_PreDec: { // --x
     if (!this->visit(SubExpr))
@@ -3216,15 +3255,20 @@ bool ByteCodeExprGen<Emitter>::VisitUnaryOperator(const UnaryOperator *E) {
         return false;
       if (!this->emitSubf(getRoundingMode(E), E))
         return false;
-      return this->emitStoreFloat(E);
+      if (!this->emitStoreFloat(E))
+        return false;
+    } else {
+      assert(isIntegralType(*T));
+      if (!this->emitLoad(*T, E))
+        return false;
+      if (!this->emitConst(1, E))
+        return false;
+      if (!this->emitSub(*T, E))
+        return false;
+      if (!this->emitStore(*T, E))
+        return false;
     }
-    if (!this->emitLoad(*T, E))
-      return false;
-    if (!this->emitConst(1, E))
-      return false;
-    if (!this->emitSub(*T, E))
-      return false;
-    return this->emitStore(*T, E);
+    return E->isGLValue() || this->emitLoadPop(*T, E);
   }
   case UO_LNot: // !x
     if (DiscardResult)
