@@ -303,6 +303,11 @@ New Compiler Flags
   allow late parsing certain attributes in specific contexts where they would
   not normally be late parsed.
 
+- ``-fseparate-named-sections`` uses separate unique sections for global
+  symbols in named special sections (i.e. symbols annotated with
+  ``__attribute__((section(...)))``. This enables linker GC to collect unused
+  symbols without having to use a per-symbol section.
+
 Deprecated Compiler Flags
 -------------------------
 
@@ -681,6 +686,8 @@ Bug Fixes to C++ Support
   whose type is `decltype(auto)`. Fixes (#GH68885).
 - Clang now correctly treats the noexcept-specifier of a friend function to be a complete-class context.
 - Fix an assertion failure when parsing an invalid members of an anonymous class. (#GH85447)
+- Fixed a misuse of ``UnresolvedLookupExpr`` for ill-formed templated expressions. Fixes (#GH48673), (#GH63243)
+  and (#GH88832).
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -832,6 +839,9 @@ clang-format
   ``BreakTemplateDeclarations``.
 - ``AlwaysBreakAfterReturnType`` is deprecated and renamed to
   ``BreakAfterReturnType``.
+- Handles Java ``switch`` expressions.
+- Adds ``AllowShortCaseExpressionOnASingleLine`` option.
+- Adds ``AlignCaseArrows`` suboption to ``AlignConsecutiveShortCaseStatements``.
 
 libclang
 --------

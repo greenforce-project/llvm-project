@@ -1460,7 +1460,7 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
   if (G->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS ||
       G->getAddressSpace() == AMDGPUAS::REGION_ADDRESS) {
     if (!MFI->isModuleEntryFunction() &&
-        !GV->getName().equals("llvm.amdgcn.module.lds")) {
+        GV->getName() != "llvm.amdgcn.module.lds") {
       SDLoc DL(Op);
       const Function &Fn = DAG.getMachineFunction().getFunction();
       DiagnosticInfoUnsupported BadLDSDecl(
@@ -5988,6 +5988,13 @@ AMDGPUTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
   case AtomicRMWInst::FMax:
   case AtomicRMWInst::FMin:
     return AtomicExpansionKind::CmpXChg;
+  case AtomicRMWInst::Xchg: {
+    const DataLayout &DL = RMW->getFunction()->getParent()->getDataLayout();
+    unsigned ValSize = DL.getTypeSizeInBits(RMW->getType());
+    if (ValSize == 32 || ValSize == 64)
+      return AtomicExpansionKind::None;
+    return AtomicExpansionKind::CmpXChg;
+  }
   default: {
     if (auto *IntTy = dyn_cast<IntegerType>(RMW->getType())) {
       unsigned Size = IntTy->getBitWidth();
