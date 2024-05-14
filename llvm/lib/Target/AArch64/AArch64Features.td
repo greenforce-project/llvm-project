@@ -39,6 +39,10 @@ class Extension<
     // not doing so.
     string MArchName = TargetFeatureName;
 
+    // An alias that can be used on the command line, if the extension has one.
+    // Used for correcting historical names while remaining backwards compatible.
+    string MArchAlias = "";
+
     // Function MultiVersioning (FMV) properties
 
     // A C++ expression giving the number of the bit in the FMV ABI.
@@ -71,7 +75,6 @@ class FMVOnlyExtension<string FMVBit, string Name, string Deps, int Priority>
 }
 
 def : FMVOnlyExtension<"FEAT_DGH", "dgh", "", 260>;
-def : FMVOnlyExtension<"FEAT_DIT", "dit", "+dit", 180>;
 def : FMVOnlyExtension<"FEAT_DPB", "dpb", "+ccpp", 190>;
 def : FMVOnlyExtension<"FEAT_DPB2", "dpb2", "+ccpp,+ccdp", 200>;
 def : FMVOnlyExtension<"FEAT_EBF16", "ebf16", "+bf16", 290>;
@@ -164,6 +167,7 @@ def FeatureOutlineAtomics : SubtargetFeature<"outline-atomics", "OutlineAtomics"
 def FeatureFMV : SubtargetFeature<"fmv", "HasFMV", "true",
   "Enable Function Multi Versioning support.">;
 
+let MArchAlias = "rdma" in
 def FeatureRDM : Extension<"rdm", "RDM",
   "Enable ARMv8.1 Rounding Double Multiply Add/Subtract instructions (FEAT_RDM)",
   [FeatureNEON],
@@ -455,9 +459,10 @@ def FeatureMPAM : SubtargetFeature<
     "mpam", "HasMPAM", "true",
     "Enable v8.4-A Memory system Partitioning and Monitoring extension (FEAT_MPAM)">;
 
-def FeatureDIT : SubtargetFeature<
-    "dit", "HasDIT", "true",
-    "Enable v8.4-A Data Independent Timing instructions (FEAT_DIT)">;
+def FeatureDIT : Extension<
+    "dit", "DIT",
+    "Enable v8.4-A Data Independent Timing instructions (FEAT_DIT)", [],
+    "FEAT_DIT", "+dit", 180>;
 
 def FeatureTRACEV8_4 : SubtargetFeature<
     "tracev8.4", "HasTRACEV8_4", "true",
