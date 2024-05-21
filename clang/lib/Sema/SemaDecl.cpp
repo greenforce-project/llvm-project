@@ -2465,9 +2465,9 @@ NamedDecl *Sema::LazilyCreateBuiltin(IdentifierInfo *II, unsigned ID,
 /// entity if their types are the same.
 /// FIXME: This is notionally doing the same thing as ASTReaderDecl's
 /// isSameEntity.
-static void filterNonConflictingPreviousTypedefDecls(Sema &S,
-                                                     TypedefNameDecl *Decl,
-                                                     LookupResult &Previous) {
+static void
+filterNonConflictingPreviousTypedefDecls(Sema &S, const TypedefNameDecl *Decl,
+                                         LookupResult &Previous) {
   // This is only interesting when modules are enabled.
   if (!S.getLangOpts().Modules && !S.getLangOpts().ModulesLocalVisibility)
     return;
@@ -2504,9 +2504,9 @@ static void filterNonConflictingPreviousTypedefDecls(Sema &S,
   Filter.done();
 }
 
-bool Sema::isIncompatibleTypedef(TypeDecl *Old, TypedefNameDecl *New) {
+bool Sema::isIncompatibleTypedef(const TypeDecl *Old, TypedefNameDecl *New) {
   QualType OldType;
-  if (TypedefNameDecl *OldTypedef = dyn_cast<TypedefNameDecl>(Old))
+  if (const TypedefNameDecl *OldTypedef = dyn_cast<TypedefNameDecl>(Old))
     OldType = OldTypedef->getUnderlyingType();
   else
     OldType = Context.getTypeDeclType(Old);
@@ -2879,7 +2879,7 @@ static bool mergeDeclAttribute(Sema &S, NamedDecl *D,
         D, *AA, AA->getPlatform(), AA->isImplicit(), AA->getIntroduced(),
         AA->getDeprecated(), AA->getObsoleted(), AA->getUnavailable(),
         AA->getMessage(), AA->getStrict(), AA->getReplacement(), AMK,
-        AA->getPriority());
+        AA->getPriority(), AA->getEnvironment());
   else if (const auto *VA = dyn_cast<VisibilityAttr>(Attr))
     NewAttr = S.mergeVisibilityAttr(D, *VA, VA->getVisibility());
   else if (const auto *VA = dyn_cast<TypeVisibilityAttr>(Attr))
@@ -9217,19 +9217,20 @@ static NamedDecl *DiagnoseInvalidRedeclaration(
         << Idx << FDParam->getType()
         << NewFD->getParamDecl(Idx - 1)->getType();
     } else if (FDisConst != NewFDisConst) {
-      SemaRef.Diag(FD->getLocation(), diag::note_member_def_close_const_match)
-          << NewFDisConst << FD->getSourceRange().getEnd()
-          << (NewFDisConst
-                  ? FixItHint::CreateRemoval(ExtraArgs.D.getFunctionTypeInfo()
-                                                 .getConstQualifierLoc())
-                  : FixItHint::CreateInsertion(ExtraArgs.D.getFunctionTypeInfo()
-                                                   .getRParenLoc()
-                                                   .getLocWithOffset(1),
-                                               " const"));
-    } else
+      auto DB = SemaRef.Diag(FD->getLocation(),
+                             diag::note_member_def_close_const_match)
+                << NewFDisConst << FD->getSourceRange().getEnd();
+      if (const auto &FTI = ExtraArgs.D.getFunctionTypeInfo(); !NewFDisConst)
+        DB << FixItHint::CreateInsertion(FTI.getRParenLoc().getLocWithOffset(1),
+                                         " const");
+      else if (FTI.hasMethodTypeQualifiers() &&
+               FTI.getConstQualifierLoc().isValid())
+        DB << FixItHint::CreateRemoval(FTI.getConstQualifierLoc());
+    } else {
       SemaRef.Diag(FD->getLocation(),
                    IsMember ? diag::note_member_def_close_match
                             : diag::note_local_decl_close_match);
+    }
   }
   return nullptr;
 }
