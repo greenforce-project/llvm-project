@@ -76,9 +76,7 @@ define <4 x i64> @deinterleave_shuffle_v8i64(<8 x i64> %a) {
 define <4 x float> @deinterleave_shuffle_v8f32(<8 x float> %a) {
 ; CHECK-LABEL: deinterleave_shuffle_v8f32:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    uzp1 v2.4s, v0.4s, v1.4s
-; CHECK-NEXT:    uzp2 v0.4s, v0.4s, v1.4s
-; CHECK-NEXT:    fadd v0.4s, v2.4s, v0.4s
+; CHECK-NEXT:    faddp v0.4s, v0.4s, v1.4s
 ; CHECK-NEXT:    ret
   %r0 = shufflevector <8 x float> %a, <8 x float> poison, <4 x i32> <i32 0, i32 2, i32 4, i32 6>
   %r1 = shufflevector <8 x float> %a, <8 x float> poison, <4 x i32> <i32 1, i32 3, i32 5, i32 7>
@@ -89,9 +87,7 @@ define <4 x float> @deinterleave_shuffle_v8f32(<8 x float> %a) {
 define <4 x float> @deinterleave_shuffle_v8f32_c(<8 x float> %a) {
 ; CHECK-LABEL: deinterleave_shuffle_v8f32_c:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    uzp1 v2.4s, v0.4s, v1.4s
-; CHECK-NEXT:    uzp2 v0.4s, v0.4s, v1.4s
-; CHECK-NEXT:    fadd v0.4s, v0.4s, v2.4s
+; CHECK-NEXT:    faddp v0.4s, v0.4s, v1.4s
 ; CHECK-NEXT:    ret
   %r0 = shufflevector <8 x float> %a, <8 x float> poison, <4 x i32> <i32 0, i32 2, i32 4, i32 6>
   %r1 = shufflevector <8 x float> %a, <8 x float> poison, <4 x i32> <i32 1, i32 3, i32 5, i32 7>
@@ -116,9 +112,7 @@ define <8 x half> @deinterleave_shuffle_v16f16(<16 x half> %a) {
 ;
 ; CHECK-FP16-LABEL: deinterleave_shuffle_v16f16:
 ; CHECK-FP16:       // %bb.0:
-; CHECK-FP16-NEXT:    uzp1 v2.8h, v0.8h, v1.8h
-; CHECK-FP16-NEXT:    uzp2 v0.8h, v0.8h, v1.8h
-; CHECK-FP16-NEXT:    fadd v0.8h, v2.8h, v0.8h
+; CHECK-FP16-NEXT:    faddp v0.8h, v0.8h, v1.8h
 ; CHECK-FP16-NEXT:    ret
   %r0 = shufflevector <16 x half> %a, <16 x half> poison, <8 x i32> <i32 0, i32 2, i32 4, i32 6, i32 8, i32 10, i32 12, i32 14>
   %r1 = shufflevector <16 x half> %a, <16 x half> poison, <8 x i32> <i32 1, i32 3, i32 5, i32 7, i32 9, i32 11, i32 13, i32 15>
@@ -129,12 +123,9 @@ define <8 x half> @deinterleave_shuffle_v16f16(<16 x half> %a) {
 define <4 x double> @deinterleave_shuffle_v8f64(<8 x double> %a) {
 ; CHECK-LABEL: deinterleave_shuffle_v8f64:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    zip1 v4.2d, v2.2d, v3.2d
-; CHECK-NEXT:    zip1 v5.2d, v0.2d, v1.2d
-; CHECK-NEXT:    zip2 v2.2d, v2.2d, v3.2d
-; CHECK-NEXT:    zip2 v0.2d, v0.2d, v1.2d
-; CHECK-NEXT:    fadd v1.2d, v4.2d, v2.2d
-; CHECK-NEXT:    fadd v0.2d, v5.2d, v0.2d
+; CHECK-NEXT:    faddp v2.2d, v2.2d, v3.2d
+; CHECK-NEXT:    faddp v0.2d, v0.2d, v1.2d
+; CHECK-NEXT:    mov v1.16b, v2.16b
 ; CHECK-NEXT:    ret
   %r0 = shufflevector <8 x double> %a, <8 x double> poison, <4 x i32> <i32 0, i32 2, i32 4, i32 6>
   %r1 = shufflevector <8 x double> %a, <8 x double> poison, <4 x i32> <i32 1, i32 3, i32 5, i32 7>
@@ -145,15 +136,13 @@ define <4 x double> @deinterleave_shuffle_v8f64(<8 x double> %a) {
 define <4 x i32> @udot(<4 x i32> %z, <16 x i8> %a, <16 x i8> %b) {
 ; CHECK-LABEL: udot:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    ushll v3.8h, v1.8b, #0
-; CHECK-NEXT:    ushll v4.8h, v2.8b, #0
-; CHECK-NEXT:    ushll2 v1.8h, v1.16b, #0
-; CHECK-NEXT:    ushll2 v2.8h, v2.16b, #0
-; CHECK-NEXT:    umull2 v5.4s, v3.8h, v4.8h
-; CHECK-NEXT:    umull v3.4s, v3.4h, v4.4h
-; CHECK-NEXT:    umull2 v4.4s, v1.8h, v2.8h
-; CHECK-NEXT:    umull v1.4s, v1.4h, v2.4h
-; CHECK-NEXT:    addp v2.4s, v3.4s, v5.4s
+; CHECK-NEXT:    umull v3.8h, v1.8b, v2.8b
+; CHECK-NEXT:    umull2 v1.8h, v1.16b, v2.16b
+; CHECK-NEXT:    ushll2 v2.4s, v3.8h, #0
+; CHECK-NEXT:    ushll v3.4s, v3.4h, #0
+; CHECK-NEXT:    ushll2 v4.4s, v1.8h, #0
+; CHECK-NEXT:    ushll v1.4s, v1.4h, #0
+; CHECK-NEXT:    addp v2.4s, v3.4s, v2.4s
 ; CHECK-NEXT:    addp v1.4s, v1.4s, v4.4s
 ; CHECK-NEXT:    addp v1.4s, v2.4s, v1.4s
 ; CHECK-NEXT:    add v0.4s, v0.4s, v1.4s
@@ -174,15 +163,13 @@ define <4 x i32> @udot(<4 x i32> %z, <16 x i8> %a, <16 x i8> %b) {
 define <4 x i32> @sdot(<4 x i32> %z, <16 x i8> %a, <16 x i8> %b) {
 ; CHECK-LABEL: sdot:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    sshll v3.8h, v1.8b, #0
-; CHECK-NEXT:    sshll v4.8h, v2.8b, #0
-; CHECK-NEXT:    sshll2 v1.8h, v1.16b, #0
-; CHECK-NEXT:    sshll2 v2.8h, v2.16b, #0
-; CHECK-NEXT:    smull2 v5.4s, v3.8h, v4.8h
-; CHECK-NEXT:    smull v3.4s, v3.4h, v4.4h
-; CHECK-NEXT:    smull2 v4.4s, v1.8h, v2.8h
-; CHECK-NEXT:    smull v1.4s, v1.4h, v2.4h
-; CHECK-NEXT:    addp v2.4s, v3.4s, v5.4s
+; CHECK-NEXT:    smull v3.8h, v1.8b, v2.8b
+; CHECK-NEXT:    smull2 v1.8h, v1.16b, v2.16b
+; CHECK-NEXT:    sshll2 v2.4s, v3.8h, #0
+; CHECK-NEXT:    sshll v3.4s, v3.4h, #0
+; CHECK-NEXT:    sshll2 v4.4s, v1.8h, #0
+; CHECK-NEXT:    sshll v1.4s, v1.4h, #0
+; CHECK-NEXT:    addp v2.4s, v3.4s, v2.4s
 ; CHECK-NEXT:    addp v1.4s, v1.4s, v4.4s
 ; CHECK-NEXT:    addp v1.4s, v2.4s, v1.4s
 ; CHECK-NEXT:    add v0.4s, v0.4s, v1.4s
