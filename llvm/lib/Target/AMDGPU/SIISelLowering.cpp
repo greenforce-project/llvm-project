@@ -791,8 +791,8 @@ SITargetLowering::SITargetLowering(const TargetMachine &TM,
     for (MVT VT : {MVT::v4i16, MVT::v8i16, MVT::v16i16, MVT::v32i16})
       // Split vector operations.
       setOperationAction({ISD::SHL, ISD::SRA, ISD::SRL, ISD::ADD, ISD::SUB,
-                          ISD::MUL, ISD::SMIN, ISD::SMAX, ISD::UMIN, ISD::UMAX,
-                          ISD::UADDSAT, ISD::SADDSAT, ISD::USUBSAT,
+                          ISD::MUL, ISD::ABS, ISD::SMIN, ISD::SMAX, ISD::UMIN,
+                          ISD::UMAX, ISD::UADDSAT, ISD::SADDSAT, ISD::USUBSAT,
                           ISD::SSUBSAT},
                          VT, Custom);
 
@@ -945,6 +945,8 @@ SITargetLowering::SITargetLowering(const TargetMachine &TM,
                        ISD::ATOMIC_LOAD_UMIN,
                        ISD::ATOMIC_LOAD_UMAX,
                        ISD::ATOMIC_LOAD_FADD,
+                       ISD::ATOMIC_LOAD_FMIN,
+                       ISD::ATOMIC_LOAD_FMAX,
                        ISD::ATOMIC_LOAD_UINC_WRAP,
                        ISD::ATOMIC_LOAD_UDEC_WRAP,
                        ISD::INTRINSIC_VOID,
@@ -5804,6 +5806,7 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
     return lowerTRAP(Op, DAG);
   case ISD::DEBUGTRAP:
     return lowerDEBUGTRAP(Op, DAG);
+  case ISD::ABS:
   case ISD::FABS:
   case ISD::FNEG:
   case ISD::FCANONICALIZE:
@@ -8706,25 +8709,11 @@ SDValue SITargetLowering::LowerINTRINSIC_W_CHAIN(SDValue Op,
   case Intrinsic::amdgcn_ds_fmin:
   case Intrinsic::amdgcn_ds_fmax: {
     MemSDNode *M = cast<MemSDNode>(Op);
-    unsigned Opc;
-    switch (IntrID) {
-    case Intrinsic::amdgcn_ds_fmin:
-      Opc = AMDGPUISD::ATOMIC_LOAD_FMIN;
-      break;
-    case Intrinsic::amdgcn_ds_fmax:
-      Opc = AMDGPUISD::ATOMIC_LOAD_FMAX;
-      break;
-    default:
-      llvm_unreachable("Unknown intrinsic!");
-    }
-    SDValue Ops[] = {
-      M->getOperand(0), // Chain
-      M->getOperand(2), // Ptr
-      M->getOperand(3)  // Value
-    };
-
-    return DAG.getMemIntrinsicNode(Opc, SDLoc(Op), M->getVTList(), Ops,
-                                   M->getMemoryVT(), M->getMemOperand());
+    unsigned Opc = IntrID == Intrinsic::amdgcn_ds_fmin ? ISD::ATOMIC_LOAD_FMIN
+                                                       : ISD::ATOMIC_LOAD_FMAX;
+    return DAG.getAtomic(Opc, SDLoc(Op), M->getMemoryVT(), M->getOperand(0),
+                         M->getOperand(2), M->getOperand(3),
+                         M->getMemOperand());
   }
   case Intrinsic::amdgcn_raw_buffer_load:
   case Intrinsic::amdgcn_raw_ptr_buffer_load:
@@ -8832,15 +8821,9 @@ SDValue SITargetLowering::LowerINTRINSIC_W_CHAIN(SDValue Op,
   case Intrinsic::amdgcn_raw_buffer_atomic_fadd:
   case Intrinsic::amdgcn_raw_ptr_buffer_atomic_fadd:
     return lowerRawBufferAtomicIntrin(Op, DAG, AMDGPUISD::BUFFER_ATOMIC_FADD);
-  case Intrinsic::amdgcn_raw_buffer_atomic_fadd_v2bf16:
-    return lowerRawBufferAtomicIntrin(Op, DAG,
-                                      AMDGPUISD::BUFFER_ATOMIC_FADD_BF16);
   case Intrinsic::amdgcn_struct_buffer_atomic_fadd:
   case Intrinsic::amdgcn_struct_ptr_buffer_atomic_fadd:
     return lowerStructBufferAtomicIntrin(Op, DAG, AMDGPUISD::BUFFER_ATOMIC_FADD);
-  case Intrinsic::amdgcn_struct_buffer_atomic_fadd_v2bf16:
-    return lowerStructBufferAtomicIntrin(Op, DAG,
-                                         AMDGPUISD::BUFFER_ATOMIC_FADD_BF16);
   case Intrinsic::amdgcn_raw_buffer_atomic_fmin:
   case Intrinsic::amdgcn_raw_ptr_buffer_atomic_fmin:
     return lowerRawBufferAtomicIntrin(Op, DAG, AMDGPUISD::BUFFER_ATOMIC_FMIN);
@@ -9135,22 +9118,21 @@ SDValue SITargetLowering::LowerINTRINSIC_W_CHAIN(SDValue Op,
     case Intrinsic::amdgcn_global_atomic_fmin_num:
     case Intrinsic::amdgcn_flat_atomic_fmin:
     case Intrinsic::amdgcn_flat_atomic_fmin_num: {
-      Opcode = AMDGPUISD::ATOMIC_LOAD_FMIN;
+      Opcode = ISD::ATOMIC_LOAD_FMIN;
       break;
     }
     case Intrinsic::amdgcn_global_atomic_fmax:
     case Intrinsic::amdgcn_global_atomic_fmax_num:
     case Intrinsic::amdgcn_flat_atomic_fmax:
     case Intrinsic::amdgcn_flat_atomic_fmax_num: {
-      Opcode = AMDGPUISD::ATOMIC_LOAD_FMAX;
+      Opcode = ISD::ATOMIC_LOAD_FMAX;
       break;
     }
     default:
       llvm_unreachable("unhandled atomic opcode");
     }
-    return DAG.getMemIntrinsicNode(Opcode, SDLoc(Op),
-                                   M->getVTList(), Ops, M->getMemoryVT(),
-                                   M->getMemOperand());
+    return DAG.getAtomic(Opcode, SDLoc(Op), M->getMemoryVT(), M->getVTList(),
+                         Ops, M->getMemOperand());
   }
   case Intrinsic::amdgcn_s_get_barrier_state: {
     SDValue Chain = Op->getOperand(0);
@@ -15821,8 +15803,6 @@ bool SITargetLowering::isSDNodeSourceOfDivergence(const SDNode *N,
   case ISD::INTRINSIC_W_CHAIN:
     return AMDGPU::isIntrinsicSourceOfDivergence(N->getConstantOperandVal(1));
   case AMDGPUISD::ATOMIC_CMP_SWAP:
-  case AMDGPUISD::ATOMIC_LOAD_FMIN:
-  case AMDGPUISD::ATOMIC_LOAD_FMAX:
   case AMDGPUISD::BUFFER_ATOMIC_SWAP:
   case AMDGPUISD::BUFFER_ATOMIC_ADD:
   case AMDGPUISD::BUFFER_ATOMIC_SUB:
@@ -15838,7 +15818,6 @@ bool SITargetLowering::isSDNodeSourceOfDivergence(const SDNode *N,
   case AMDGPUISD::BUFFER_ATOMIC_CMPSWAP:
   case AMDGPUISD::BUFFER_ATOMIC_CSUB:
   case AMDGPUISD::BUFFER_ATOMIC_FADD:
-  case AMDGPUISD::BUFFER_ATOMIC_FADD_BF16:
   case AMDGPUISD::BUFFER_ATOMIC_FMIN:
   case AMDGPUISD::BUFFER_ATOMIC_FMAX:
     // Target-specific read-modify-write atomics are sources of divergence.
@@ -15931,6 +15910,26 @@ static OptimizationRemark emitAtomicRMWLegalRemark(const AtomicRMWInst *RMW) {
          << " operation at memory scope " << MemScope;
 }
 
+static bool isHalf2OrBFloat2(Type *Ty) {
+  if (auto *VT = dyn_cast<FixedVectorType>(Ty)) {
+    Type *EltTy = VT->getElementType();
+    return VT->getNumElements() == 2 &&
+           (EltTy->isHalfTy() || EltTy->isBFloatTy());
+  }
+
+  return false;
+}
+
+static bool isHalf2(Type *Ty) {
+  FixedVectorType *VT = dyn_cast<FixedVectorType>(Ty);
+  return VT && VT->getNumElements() == 2 && VT->getElementType()->isHalfTy();
+}
+
+static bool isBFloat2(Type *Ty) {
+  FixedVectorType *VT = dyn_cast<FixedVectorType>(Ty);
+  return VT && VT->getNumElements() == 2 && VT->getElementType()->isBFloatTy();
+}
+
 TargetLowering::AtomicExpansionKind
 SITargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
   unsigned AS = RMW->getPointerAddressSpace();
@@ -15989,7 +15988,9 @@ SITargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
                                                  : AtomicExpansionKind::CmpXChg;
       }
 
-      // TODO: Handle v2f16/v2bf16 cases for gfx940
+      if (Subtarget->hasAtomicDsPkAdd16Insts() && isHalf2OrBFloat2(Ty))
+        return AtomicExpansionKind::None;
+
       return AtomicExpansionKind::CmpXChg;
     }
 
@@ -15997,9 +15998,28 @@ SITargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
         AS != AMDGPUAS::BUFFER_FAT_POINTER)
       return AtomicExpansionKind::CmpXChg;
 
-    // TODO: gfx940 supports v2f16 and v2bf16
     if (Subtarget->hasGFX940Insts() && (Ty->isFloatTy() || Ty->isDoubleTy()))
       return AtomicExpansionKind::None;
+
+    if (AS == AMDGPUAS::FLAT_ADDRESS) {
+      // gfx940, gfx12
+      // FIXME: Needs to account for no fine-grained memory
+      if (Subtarget->hasAtomicFlatPkAdd16Insts() && isHalf2OrBFloat2(Ty))
+        return AtomicExpansionKind::None;
+    } else if (AMDGPU::isExtendedGlobalAddrSpace(AS)) {
+      // gfx90a, gfx940, gfx12
+      // FIXME: Needs to account for no fine-grained memory
+      if (Subtarget->hasAtomicBufferGlobalPkAddF16Insts() && isHalf2(Ty))
+        return AtomicExpansionKind::None;
+
+      // gfx940, gfx12
+      // FIXME: Needs to account for no fine-grained memory
+      if (Subtarget->hasAtomicGlobalPkAddBF16Inst() && isBFloat2(Ty))
+        return AtomicExpansionKind::None;
+    }
+
+    // TODO: Handle buffer case. gfx90a and gfx940 supports <2 x half>. gfx12
+    // supports <2 x half> and <2 x bfloat>.
 
     if (unsafeFPAtomicsDisabled(RMW->getFunction()))
       return AtomicExpansionKind::CmpXChg;
@@ -16042,17 +16062,21 @@ SITargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
     return AtomicExpansionKind::CmpXChg;
   }
   case AtomicRMWInst::FMin:
-  case AtomicRMWInst::FMax:
+  case AtomicRMWInst::FMax: {
+    Type *Ty = RMW->getType();
+
+    // LDS float and double fmin/fmax were always supported.
+    if (AS == AMDGPUAS::LOCAL_ADDRESS && (Ty->isFloatTy() || Ty->isDoubleTy()))
+      return AtomicExpansionKind::None;
+
+    return AtomicExpansionKind::CmpXChg;
+  }
   case AtomicRMWInst::Min:
   case AtomicRMWInst::Max:
   case AtomicRMWInst::UMin:
   case AtomicRMWInst::UMax: {
     if (AMDGPU::isFlatGlobalAddrSpace(AS) ||
         AS == AMDGPUAS::BUFFER_FAT_POINTER) {
-      if (RMW->getType()->isFloatTy() &&
-          unsafeFPAtomicsDisabled(RMW->getFunction()))
-        return AtomicExpansionKind::CmpXChg;
-
       // Always expand system scope min/max atomics.
       if (HasSystemScope)
         return AtomicExpansionKind::CmpXChg;
