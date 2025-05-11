@@ -97,11 +97,6 @@ std::string getClangToolFullVersion(StringRef ToolName) {
 #endif
   OS << ToolName << " version " CLANG_VERSION_STRING;
 
-  std::string repo = getClangFullRepositoryVersion();
-  if (!repo.empty()) {
-    OS << " " << repo;
-  }
-
   return OS.str();
 }
 
